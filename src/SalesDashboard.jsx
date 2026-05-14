@@ -150,7 +150,7 @@ function AgentTargetBar({ agent, index, showDetails = true }) {
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>{agent.name}</span>
+          <span style={{ fontWeight: 600, fontSize: 14, color: "#f1f5f9" }}>{agent.name}</span>
           <span style={{ fontWeight: 700, fontSize: 14, color }}>{fmt(agent.collection)} QAR</span>
         </div>
         <div style={styles.progressBarBg}>
@@ -376,13 +376,13 @@ function TVWeeklyCollections({ agents }) {
 // ─── TV MODE CONTROLLER ───────────────────────────────────────────
 function TVMode({ agents, company, pipeline, onClose }) {
   const slides = [
+    { component: <TVCompanyPerf company={company} agents={agents} pipeline={pipeline} />, duration: 15000 },
     { component: <TVAllAgents agents={agents} />, duration: 15000 },
-    ...agents.filter((a) => a.collection > 0).sort((a, b) => b.collection - a.collection).map((a, i) => ({
+    { component: <TVWeeklyCollections agents={agents} />, duration: 15000 },
+    ...agents.filter((a) => a.collection > 0).sort((a, b) => b.collection - a.collection).map((a) => ({
       component: <TVAgentDetail agent={a} index={agents.indexOf(a)} />,
       duration: 5000,
     })),
-    { component: <TVCompanyPerf company={company} agents={agents} pipeline={pipeline} />, duration: 15000 },
-    { component: <TVWeeklyCollections agents={agents} />, duration: 15000 },
   ];
   const [current, setCurrent] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -487,6 +487,28 @@ function DataInputModal({ agents, onSave, onClose, type }) {
 // ─── AGENT MANAGEMENT MODAL ────────────────────────────────────────
 function AgentModal({ agent, onSave, onClose }) {
   const [form, setForm] = useState(agent || { name: "", image: "", target: 40000 });
+  const [preview, setPreview] = useState(agent?.image || "");
+  const fileInputRef = useRef(null);
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result;
+        setForm({ ...form, image: base64 });
+        setPreview(base64);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setForm({ ...form, image: "" });
+    setPreview("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   return (
     <div style={styles.modal} onClick={onClose}>
       <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
@@ -497,8 +519,28 @@ function AgentModal({ agent, onSave, onClose }) {
             <input style={styles.input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Agent name" />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6, display: "block" }}>Image URL</label>
-            <input style={styles.input} value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="https://..." />
+            <label style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6, display: "block" }}>Profile Photo</label>
+            {preview ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                <img src={preview} alt="Preview" style={{ width: 60, height: 60, borderRadius: "50%", objectFit: "cover", border: `2px solid ${COLORS.accent}` }} />
+                <button style={{ ...styles.btn(COLORS.danger), padding: "6px 14px", fontSize: 12 }} onClick={handleRemoveImage}>Remove</button>
+              </div>
+            ) : (
+              <div style={{ width: 60, height: 60, borderRadius: "50%", background: COLORS.cardAlt, border: `2px dashed ${COLORS.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: COLORS.textDim, marginBottom: 8 }}>👤</div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              style={{ display: "none" }}
+            />
+            <button
+              style={{ ...styles.btn(COLORS.purple), width: "100%", textAlign: "center" }}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              📷 {preview ? "Change Photo" : "Upload Photo"}
+            </button>
           </div>
           <div>
             <label style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6, display: "block" }}>Monthly Target (QAR)</label>
@@ -573,6 +615,14 @@ export default function SalesDashboard() {
   });
   const [tvMode, setTvMode] = useState(false);
   const [modal, setModal] = useState(null); // { type: "monthly"|"weekly"|"agent"|"pipeline"|"company", agent?: obj }
+
+  // Auto-launch TV mode if ?tv=true in URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("tv") === "true") {
+      setTvMode(true);
+    }
+  }, []);
 
   // Persist
   useEffect(() => { localStorage.setItem("sd_agents", JSON.stringify(agents)); }, [agents]);
@@ -784,9 +834,31 @@ export default function SalesDashboard() {
           <div style={styles.card}>
             <div style={styles.cardTitle}>📺 TV Display</div>
             <p style={{ fontSize: 13, color: COLORS.textDim, margin: "0 0 12px" }}>Launch the auto-rotating TV display for the meeting room screen.</p>
-            <button style={{ ...styles.btn(), width: "100%", fontSize: 16, padding: "14px 20px" }} onClick={() => setTvMode(true)}>
+            <button style={{ ...styles.btn(), width: "100%", fontSize: 16, padding: "14px 20px", marginBottom: 12 }} onClick={() => setTvMode(true)}>
               🖥️ Launch TV Mode
             </button>
+            <div style={{ background: COLORS.cardAlt, borderRadius: 8, padding: 14, border: `1px solid ${COLORS.border}` }}>
+              <div style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6 }}>📎 Share this link with the TV operator:</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="text"
+                  readOnly
+                  value={`${window.location.origin}${window.location.pathname}?tv=true`}
+                  style={{ ...styles.input, fontSize: 12, flex: 1 }}
+                  onClick={(e) => e.target.select()}
+                />
+                <button
+                  style={{ ...styles.btn(), padding: "10px 14px", whiteSpace: "nowrap" }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?tv=true`);
+                    alert("TV link copied to clipboard!");
+                  }}
+                >
+                  📋 Copy
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: COLORS.textDim, margin: "8px 0 0" }}>Opening this link will automatically start the TV slideshow mode. Press ESC or click "Exit TV" to return to the dashboard.</p>
+            </div>
           </div>
         </div>
       </div>
