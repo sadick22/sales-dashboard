@@ -1,5 +1,20 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend, PieChart, Pie, Cell, AreaChart, Area } from "recharts";
+import { initializeApp } from "firebase/app";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "firebase/auth";
+
+// ─── FIREBASE CONFIG ───────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyCYlKUGPncBMxs6ga2wVa9pxj_dFS5vyXs",
+  authDomain: "sales-dashboard-f3e57.firebaseapp.com",
+  projectId: "sales-dashboard-f3e57",
+  storageBucket: "sales-dashboard-f3e57.firebasestorage.app",
+  messagingSenderId: "208227630609",
+  appId: "1:208227630609:web:77877cddc3b4a1c400bbb0"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
 
 // ─── DEFAULT DATA ──────────────────────────────────────────────────
 const DEFAULT_AGENTS = [
@@ -104,24 +119,34 @@ const styles = {
 
 // ─── LOGIN SCREEN ──────────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!username || !password) {
+      setError("Please enter both username and password");
+      return;
+    }
     setLoading(true);
     setError("");
-    // Simple auth check — replace with Firebase later
-    setTimeout(() => {
-      if (email && password.length >= 4) {
-        onLogin({ email });
+    try {
+      // Convert username to email format for Firebase
+      const email = username.includes("@") ? username : `${username}@dashboard.local`;
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      onLogin(userCredential.user);
+    } catch (err) {
+      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
+        setError("Invalid username or password");
+      } else if (err.code === "auth/too-many-requests") {
+        setError("Too many failed attempts. Please try again later.");
       } else {
-        setError("Invalid email or password (min 4 characters)");
+        setError("Login failed. Please try again.");
       }
-      setLoading(false);
-    }, 800);
+    }
+    setLoading(false);
   };
 
   return (
@@ -134,12 +159,12 @@ function LoginScreen({ onLogin }) {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
-            <label style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6, display: "block" }}>Email</label>
-            <input type="email" style={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@company.com" />
+            <label style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6, display: "block" }}>Username</label>
+            <input type="text" style={styles.input} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Enter username" autoComplete="username" />
           </div>
           <div>
             <label style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6, display: "block" }}>Password</label>
-            <input type="password" style={styles.input} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter password" onKeyDown={(e) => e.key === "Enter" && handleSubmit(e)} />
+            <input type="password" style={styles.input} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter password" onKeyDown={(e) => e.key === "Enter" && handleSubmit()} autoComplete="current-password" />
           </div>
           {error && <div style={{ padding: "8px 12px", borderRadius: 8, background: `${COLORS.danger}18`, color: COLORS.danger, fontSize: 13 }}>{error}</div>}
           <button style={{ ...styles.btn(), width: "100%", textAlign: "center", padding: "12px 20px", fontSize: 15, opacity: loading ? 0.6 : 1 }} onClick={handleSubmit} disabled={loading}>
@@ -653,9 +678,8 @@ function PipelineModal({ pipeline, onSave, onClose }) {
 
 // ─── MAIN APP ──────────────────────────────────────────────────────
 export default function SalesDashboard() {
-  const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    try { return !!localStorage.getItem("sd_user"); } catch { return false; }
-  });
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   const [page, setPage] = useState("dashboard");
   const [agents, setAgents] = useState(() => {
     try { const s = localStorage.getItem("sd_agents"); return s ? JSON.parse(s) : DEFAULT_AGENTS; } catch { return DEFAULT_AGENTS; }
@@ -672,6 +696,15 @@ export default function SalesDashboard() {
   const [tvMode, setTvMode] = useState(false);
   const [modal, setModal] = useState(null);
 
+  // Firebase auth state listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setIsLoggedIn(!!user);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Auto-launch TV mode if ?tv=true in URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -687,13 +720,16 @@ export default function SalesDashboard() {
   useEffect(() => { localStorage.setItem("sd_logo", logo); }, [logo]);
 
   const handleLogin = (user) => {
-    localStorage.setItem("sd_user", JSON.stringify(user));
     setIsLoggedIn(true);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("sd_user");
-    setIsLoggedIn(false);
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setIsLoggedIn(false);
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
   };
 
   // Logo upload handler
@@ -731,6 +767,18 @@ export default function SalesDashboard() {
       setAgents((prev) => prev.filter((a) => a.id !== id));
     }
   };
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 60, height: 60, borderRadius: 14, background: `linear-gradient(135deg, ${COLORS.accent}, #6366f1)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: "#fff", marginBottom: 16 }}>S</div>
+          <div style={{ color: COLORS.textDim, fontSize: 14 }}>Loading...</div>
+        </div>
+      </div>
+    );
+  }
 
   // Show login if not authenticated (skip for TV mode via URL)
   if (!isLoggedIn && !tvMode) {
