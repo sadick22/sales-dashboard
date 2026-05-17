@@ -18,7 +18,6 @@ const DEFAULT_AGENTS = [
 ];
 
 const DEFAULT_COMPANY = {
-  yearlyTarget: 4700000,
   q1Target: 1175000, q1Done: 463443,
   q2Target: 1175000, q2Done: 463443,
   q3Target: 1175000, q3Done: 0,
@@ -53,7 +52,9 @@ const COLORS = {
   chartGreen: "#34d399",
 };
 
-const AGENT_COLORS = ["#38bdf8", "#34d399", "#fbbf24", "#f472b6", "#a78bfa", "#fb923c", "#ef4444", "#06b6d4", "#84cc16", "#e879f9", "#f97316", "#22d3ee"];
+// Simplified to 2 main colors: cyan for progress, dark grey for remaining
+const BAR_CYAN = "#00d4ff";
+const BAR_GREY = "#334155";
 
 // ─── UTILITY FUNCTIONS ─────────────────────────────────────────────
 const fmt = (n) => new Intl.NumberFormat("en-QA").format(n);
@@ -69,9 +70,7 @@ const getTrend = (current, previous) => {
 const styles = {
   app: { minHeight: "100vh", background: COLORS.bg, color: COLORS.text, fontFamily: "'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden" },
   nav: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 24px", background: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)", borderBottom: `1px solid ${COLORS.border}`, position: "sticky", top: 0, zIndex: 100 },
-  logo: { display: "flex", alignItems: "center", gap: "12px" },
-  logoIcon: { width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${COLORS.accent}, #6366f1)`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: "#fff" },
-  logoText: { fontSize: 20, fontWeight: 700, letterSpacing: "-0.5px", background: `linear-gradient(135deg, ${COLORS.accent}, #a78bfa)`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
+  navCenter: { position: "absolute", left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center" },
   navBtns: { display: "flex", gap: 8 },
   navBtn: (active) => ({ padding: "8px 18px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, transition: "all 0.2s", background: active ? COLORS.accent : "rgba(255,255,255,0.06)", color: active ? "#000" : COLORS.text }),
   page: { padding: "20px 24px", maxWidth: 1920, margin: "0 auto" },
@@ -81,22 +80,20 @@ const styles = {
   cardTitle: { fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: COLORS.textDim, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 },
   bigNum: { fontSize: 32, fontWeight: 800, letterSpacing: "-1px" },
   badge: (color) => ({ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: `${color}18`, color }),
-  progressBarBg: { height: 8, borderRadius: 99, background: "rgba(255,255,255,0.06)", overflow: "hidden", position: "relative" },
-  progressBarFill: (pctVal, color) => ({ height: "100%", borderRadius: 99, width: `${Math.min(pctVal, 100)}%`, background: `linear-gradient(90deg, ${color}, ${color}cc)`, transition: "width 1s ease", boxShadow: `0 0 12px ${color}40` }),
-  agentRow: { display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.02)", marginBottom: 6, transition: "all 0.2s" },
-  avatar: (color) => ({ width: 40, height: 40, borderRadius: "50%", background: `linear-gradient(135deg, ${color}, ${color}88)`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, color: "#fff", flexShrink: 0 }),
+  progressBarBg: { height: 8, borderRadius: 99, background: BAR_GREY, overflow: "hidden", position: "relative" },
+  progressBarFill: (pctVal) => ({ height: "100%", borderRadius: 99, width: `${Math.min(pctVal, 100)}%`, background: BAR_CYAN, transition: "width 1s ease", boxShadow: `0 0 12px ${BAR_CYAN}40` }),
+  agentRow: { display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.02)", marginBottom: 6, transition: "all 0.2s", borderLeft: `3px solid ${BAR_CYAN}` },
+  avatar: { width: 40, height: 40, borderRadius: "50%", background: `linear-gradient(135deg, ${BAR_CYAN}, ${BAR_CYAN}88)`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, color: "#fff", flexShrink: 0 },
   avatarImg: { width: 40, height: 40, borderRadius: "50%", objectFit: "cover", flexShrink: 0 },
   table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 4px" },
   th: { padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: COLORS.textDim },
-  td: { padding: "12px 14px", fontSize: 14, background: "rgba(255,255,255,0.02)", fontWeight: 500 },
+  td: { padding: "12px 14px", fontSize: 14, background: "rgba(255,255,255,0.02)", fontWeight: 500, color: COLORS.text },
   tdFirst: { borderRadius: "8px 0 0 8px" },
   tdLast: { borderRadius: "0 8px 8px 0" },
-  // TV mode
   tvOverlay: { position: "fixed", inset: 0, zIndex: 9999, background: COLORS.bg, display: "flex", flexDirection: "column" },
-  tvHeader: { padding: "16px 32px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)", borderBottom: `2px solid ${COLORS.accent}30` },
+  tvHeader: { padding: "16px 32px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)", borderBottom: `2px solid ${COLORS.accent}30`, position: "relative" },
   tvContent: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 32, overflow: "hidden" },
   tvProgress: { position: "absolute", bottom: 0, left: 0, height: 4, background: `linear-gradient(90deg, ${COLORS.accent}, #6366f1)`, transition: "width 0.1s linear" },
-  // Forms
   input: { width: "100%", padding: "10px 14px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: COLORS.cardAlt, color: COLORS.text, fontSize: 14, outline: "none", boxSizing: "border-box" },
   btn: (color = COLORS.accent) => ({ padding: "10px 20px", borderRadius: 8, border: "none", background: color, color: color === COLORS.accent ? "#000" : "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", transition: "all 0.2s" }),
   btnOutline: { padding: "8px 16px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: "transparent", color: COLORS.text, fontSize: 13, cursor: "pointer" },
@@ -104,6 +101,56 @@ const styles = {
   modal: { position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" },
   modalContent: { background: COLORS.card, borderRadius: 16, padding: 28, border: `1px solid ${COLORS.border}`, width: "90%", maxWidth: 520, maxHeight: "80vh", overflowY: "auto" },
 };
+
+// ─── LOGIN SCREEN ──────────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    // Simple auth check — replace with Firebase later
+    setTimeout(() => {
+      if (email && password.length >= 4) {
+        onLogin({ email });
+      } else {
+        setError("Invalid email or password (min 4 characters)");
+      }
+      setLoading(false);
+    }, 800);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ width: 400, padding: 40, background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}` }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ width: 60, height: 60, borderRadius: 14, background: `linear-gradient(135deg, ${COLORS.accent}, #6366f1)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: "#fff", marginBottom: 16 }}>S</div>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: COLORS.text, margin: "0 0 4px" }}>Sales Dashboard</h1>
+          <p style={{ fontSize: 14, color: COLORS.textDim, margin: 0 }}>Sign in to access the dashboard</p>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <label style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6, display: "block" }}>Email</label>
+            <input type="email" style={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@company.com" />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6, display: "block" }}>Password</label>
+            <input type="password" style={styles.input} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter password" onKeyDown={(e) => e.key === "Enter" && handleSubmit(e)} />
+          </div>
+          {error && <div style={{ padding: "8px 12px", borderRadius: 8, background: `${COLORS.danger}18`, color: COLORS.danger, fontSize: 13 }}>{error}</div>}
+          <button style={{ ...styles.btn(), width: "100%", textAlign: "center", padding: "12px 20px", fontSize: 15, opacity: loading ? 0.6 : 1 }} onClick={handleSubmit} disabled={loading}>
+            {loading ? "Signing in..." : "Sign In"}
+          </button>
+        </div>
+        <p style={{ fontSize: 11, color: COLORS.textDim, textAlign: "center", marginTop: 20 }}>Contact your administrator for access credentials</p>
+      </div>
+    </div>
+  );
+}
 
 // ─── SUMMARY CARD COMPONENT ────────────────────────────────────────
 function SummaryCard({ title, value, subtitle, icon, color = COLORS.accent, trend }) {
@@ -113,11 +160,7 @@ function SummaryCard({ title, value, subtitle, icon, color = COLORS.accent, tren
       <div style={{ ...styles.cardTitle }}>{icon && <span style={{ fontSize: 16 }}>{icon}</span>}{title}</div>
       <div style={{ ...styles.bigNum, color }}>{value}</div>
       {subtitle && <div style={{ marginTop: 6, fontSize: 13, color: COLORS.textDim }}>{subtitle}</div>}
-      {trend && (
-        <div style={{ marginTop: 8 }}>
-          <span style={styles.badge(trend.color)}>{trend.icon} {trend.label}</span>
-        </div>
-      )}
+      {trend && <div style={{ marginTop: 8 }}><span style={styles.badge(trend.color)}>{trend.icon} {trend.label}</span></div>}
     </div>
   );
 }
@@ -136,29 +179,28 @@ function ProgressRing({ percent, size = 120, stroke = 10, color = COLORS.accent 
   );
 }
 
-// ─── AGENT TARGET BAR ──────────────────────────────────────────────
-function AgentTargetBar({ agent, index, showDetails = true }) {
+// ─── AGENT TARGET BAR (unified cyan/grey) ──────────────────────────
+function AgentTargetBar({ agent, showDetails = true }) {
   const p = pct(agent.collection, agent.target);
-  const color = AGENT_COLORS[index % AGENT_COLORS.length];
   const trend = getTrend(agent.may || agent.collection, agent.apr);
   return (
-    <div style={{ ...styles.agentRow, borderLeft: `3px solid ${color}` }}>
+    <div style={styles.agentRow}>
       {agent.image ? (
         <img src={agent.image} alt={agent.name} style={styles.avatarImg} />
       ) : (
-        <div style={styles.avatar(color)}>{getInitials(agent.name)}</div>
+        <div style={styles.avatar}>{getInitials(agent.name)}</div>
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <span style={{ fontWeight: 600, fontSize: 14, color: "#f1f5f9" }}>{agent.name}</span>
-          <span style={{ fontWeight: 700, fontSize: 14, color }}>{fmt(agent.collection)} QAR</span>
+          <span style={{ fontWeight: 700, fontSize: 14, color: BAR_CYAN }}>{fmt(agent.collection)} QAR</span>
         </div>
         <div style={styles.progressBarBg}>
-          <div style={styles.progressBarFill(p, color)} />
+          <div style={styles.progressBarFill(p)} />
         </div>
         {showDetails && (
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 11, color: COLORS.textDim }}>
-            <span>Target: {fmt(agent.target)} QAR</span>
+            <span style={{ color: "#94a3b8" }}>Target: {fmt(agent.target)} QAR</span>
             <span style={{ color: agent.collection >= agent.target ? COLORS.success : COLORS.danger }}>
               Diff: {fmt(agent.target - agent.collection)} QAR
             </span>
@@ -179,17 +221,20 @@ function TVAllAgents({ agents }) {
         📊 Monthly Agent Collections — Target: QAR 40,000
       </h2>
       <div style={styles.grid(2)}>
-        {sorted.map((a, i) => <AgentTargetBar key={a.id} agent={a} index={i} />)}
+        {sorted.map((a) => <AgentTargetBar key={a.id} agent={a} />)}
       </div>
     </div>
   );
 }
 
-// ─── TV SLIDE: INDIVIDUAL AGENT ────────────────────────────────────
-function TVAgentDetail({ agent, index }) {
-  const color = AGENT_COLORS[index % AGENT_COLORS.length];
+// ─── TV SLIDE: INDIVIDUAL AGENT (with quarterly target) ────────────
+function TVAgentDetail({ agent, company }) {
   const p = pct(agent.collection, agent.target);
   const trend3 = getTrend(agent.may || agent.collection, agent.apr);
+  const qTarget = company.q2Target / 12 * 3; // agent quarterly = 3 months * monthly target
+  const agentQTarget = agent.target * 3; // 40000 * 3 = 120,000
+  const agentQDone = agent.apr + (agent.may || agent.collection) + agent.jun;
+  const agentQPct = pct(agentQDone, agentQTarget);
   const monthlyData = [
     { name: "Apr", collection: agent.apr },
     { name: "May", collection: agent.may || agent.collection },
@@ -200,20 +245,32 @@ function TVAgentDetail({ agent, index }) {
   return (
     <div style={{ width: "100%", maxWidth: 1400, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
       {/* Left: Agent Info */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 24 }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20 }}>
         {agent.image ? (
-          <img src={agent.image} alt={agent.name} style={{ width: 120, height: 120, borderRadius: "50%", border: `4px solid ${color}`, objectFit: "cover" }} />
+          <img src={agent.image} alt={agent.name} style={{ width: 120, height: 120, borderRadius: "50%", border: `4px solid ${BAR_CYAN}`, objectFit: "cover" }} />
         ) : (
-          <div style={{ ...styles.avatar(color), width: 120, height: 120, fontSize: 40 }}>{getInitials(agent.name)}</div>
+          <div style={{ ...styles.avatar, width: 120, height: 120, fontSize: 40 }}>{getInitials(agent.name)}</div>
         )}
-        <h2 style={{ fontSize: 36, fontWeight: 800, margin: 0 }}>{agent.name}</h2>
-        <ProgressRing percent={p} size={180} stroke={14} color={color} />
+        <h2 style={{ fontSize: 36, fontWeight: 800, margin: 0, color: "#f1f5f9" }}>{agent.name}</h2>
+        <ProgressRing percent={p} size={160} stroke={14} color={BAR_CYAN} />
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 14, color: COLORS.textDim }}>Collection</div>
-          <div style={{ fontSize: 36, fontWeight: 800, color }}>{fmt(agent.collection)} QAR</div>
-          <div style={{ fontSize: 14, color: COLORS.textDim, marginTop: 4 }}>Target Difference: <span style={{ color: COLORS.danger, fontWeight: 600 }}>{fmt(agent.target - agent.collection)} QAR</span></div>
+          <div style={{ fontSize: 13, color: COLORS.textDim }}>Monthly Collection</div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: BAR_CYAN }}>{fmt(agent.collection)} QAR</div>
+          <div style={{ fontSize: 13, color: COLORS.textDim, marginTop: 4 }}>Target Difference: <span style={{ color: COLORS.danger, fontWeight: 600 }}>{fmt(agent.target - agent.collection)} QAR</span></div>
         </div>
-        <span style={{ ...styles.badge(trend3.color), fontSize: 14, padding: "6px 16px" }}>{trend3.icon} {trend3.label} vs previous month</span>
+        {/* Quarterly Target Info */}
+        <div style={{ background: COLORS.cardAlt, borderRadius: 12, padding: 16, width: "100%", maxWidth: 320, textAlign: "center", border: `1px solid ${COLORS.border}` }}>
+          <div style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 6 }}>Q2 Quarterly Target</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.text }}>{fmt(agentQTarget)} QAR</div>
+          <div style={{ ...styles.progressBarBg, margin: "10px 0" }}>
+            <div style={styles.progressBarFill(agentQPct)} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+            <span style={{ color: COLORS.textDim }}>Collected: <span style={{ color: BAR_CYAN, fontWeight: 600 }}>{fmt(agentQDone)}</span></span>
+            <span style={{ color: agentQPct >= 50 ? COLORS.success : COLORS.warning, fontWeight: 700 }}>{agentQPct}%</span>
+          </div>
+        </div>
+        <span style={{ ...styles.badge(trend3.color), fontSize: 13, padding: "6px 16px" }}>{trend3.icon} {trend3.label} vs previous month</span>
       </div>
       {/* Right: Charts */}
       <div style={{ display: "flex", flexDirection: "column", gap: 24, justifyContent: "center" }}>
@@ -225,7 +282,7 @@ function TVAgentDetail({ agent, index }) {
               <XAxis dataKey="name" stroke={COLORS.textDim} fontSize={12} />
               <YAxis stroke={COLORS.textDim} fontSize={12} />
               <Tooltip contentStyle={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.text }} />
-              <Bar dataKey="collection" fill={color} radius={[6, 6, 0, 0]} />
+              <Bar dataKey="collection" fill={BAR_CYAN} radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -234,16 +291,16 @@ function TVAgentDetail({ agent, index }) {
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={weeklyData}>
               <defs>
-                <linearGradient id={`grad-${index}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                  <stop offset="95%" stopColor={color} stopOpacity={0} />
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={BAR_CYAN} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={BAR_CYAN} stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
               <XAxis dataKey="name" stroke={COLORS.textDim} fontSize={10} />
               <YAxis stroke={COLORS.textDim} fontSize={10} />
               <Tooltip contentStyle={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.text }} />
-              <Area type="monotone" dataKey="value" stroke={color} fill={`url(#grad-${index})`} strokeWidth={2} />
+              <Area type="monotone" dataKey="value" stroke={BAR_CYAN} fill="url(#areaGrad)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -252,13 +309,11 @@ function TVAgentDetail({ agent, index }) {
   );
 }
 
-// ─── TV SLIDE: COMPANY PERFORMANCE ─────────────────────────────────
+// ─── TV SLIDE: COMPANY PERFORMANCE (quarterly only) ─────────────────
 function TVCompanyPerf({ company, agents, pipeline }) {
   const totalCollection = agents.reduce((s, a) => s + a.collection, 0);
-  const totalApr = agents.reduce((s, a) => s + a.apr, 0);
-  const yearlyDone = totalApr + totalCollection;
-  const yPct = pct(yearlyDone, company.yearlyTarget);
   const q2Pct = pct(totalCollection, company.q2Target);
+  const q1Pct = pct(company.q1Done, company.q1Target);
   const pipeData = [
     { name: "Apr", leads: pipeline.apr.leads, sales: pipeline.apr.sales, ratio: pipeline.apr.ratio },
     { name: "May", leads: pipeline.may.leads, sales: pipeline.may.sales, ratio: pipeline.may.ratio },
@@ -275,10 +330,10 @@ function TVCompanyPerf({ company, agents, pipeline }) {
     <div style={{ width: "100%", maxWidth: 1600 }}>
       <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 24, textAlign: "center", color: COLORS.accent }}>🏢 Company Performance Overview</h2>
       <div style={{ ...styles.grid(4), marginBottom: 24 }}>
-        <SummaryCard title="Yearly Target" value={`${fmt(company.yearlyTarget)} QAR`} subtitle={`Done: ${fmt(yearlyDone)} QAR`} icon="🎯" color={COLORS.accent} />
-        <SummaryCard title="Yearly Progress" value={`${yPct}%`} icon="📈" color={yPct >= 50 ? COLORS.success : COLORS.warning} />
-        <SummaryCard title="Q2 Target" value={`${fmt(company.q2Target)} QAR`} subtitle={`Done: ${fmt(totalCollection)} QAR`} icon="📅" color={COLORS.purple} />
+        <SummaryCard title="Q1 Target" value={`${fmt(company.q1Target)} QAR`} subtitle={`Done: ${fmt(company.q1Done)} QAR (${q1Pct}%)`} icon="📅" color={COLORS.purple} />
+        <SummaryCard title="Q2 Target" value={`${fmt(company.q2Target)} QAR`} subtitle={`Done: ${fmt(totalCollection)} QAR`} icon="📅" color={COLORS.accent} />
         <SummaryCard title="Q2 Progress" value={`${q2Pct}%`} icon="⚡" color={q2Pct >= 50 ? COLORS.success : COLORS.warning} />
+        <SummaryCard title="Team Collection" value={`${fmt(totalCollection)} QAR`} subtitle={`${agents.filter(a => a.collection > 0).length} of ${agents.length} agents active`} icon="👥" color={COLORS.gold} />
       </div>
       <div style={styles.grid(2)}>
         <div style={styles.card}>
@@ -290,8 +345,8 @@ function TVCompanyPerf({ company, agents, pipeline }) {
               <YAxis stroke={COLORS.textDim} fontSize={11} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip contentStyle={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.text }} formatter={(v) => fmt(v)} />
               <Legend />
-              <Bar dataKey="target" fill={COLORS.border} name="Target" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="done" fill={COLORS.accent} name="Collected" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="target" fill={BAR_GREY} name="Target" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="done" fill={BAR_CYAN} name="Collected" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -304,8 +359,8 @@ function TVCompanyPerf({ company, agents, pipeline }) {
               <YAxis stroke={COLORS.textDim} fontSize={11} />
               <Tooltip contentStyle={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.text }} />
               <Legend />
-              <Bar dataKey="leads" fill={COLORS.chartBlue} name="Leads" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="sales" fill={COLORS.chartGreen} name="Sales" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="leads" fill={BAR_CYAN} name="Leads" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="sales" fill={COLORS.success} name="Sales" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", justifyContent: "center", gap: 32, marginTop: 12 }}>
@@ -341,20 +396,19 @@ function TVWeeklyCollections({ agents }) {
           </tr>
         </thead>
         <tbody>
-          {sorted.map((a, i) => {
+          {sorted.map((a) => {
             const total = (a.weekly || []).reduce((s, v) => s + v, 0);
-            const color = AGENT_COLORS[agents.indexOf(a) % AGENT_COLORS.length];
             return (
               <tr key={a.id}>
-                <td style={{ ...styles.td, ...styles.tdFirst, fontWeight: 600 }}>
-                  <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: color, marginRight: 8 }} />
+                <td style={{ ...styles.td, ...styles.tdFirst, fontWeight: 600, color: "#f1f5f9" }}>
+                  <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: BAR_CYAN, marginRight: 8 }} />
                   {a.name}
                 </td>
                 {(a.weekly || []).map((v, j) => {
                   const prev = j > 0 ? a.weekly[j - 1] : 0;
                   const t = v > 0 ? getTrend(v, prev) : null;
                   return (
-                    <td key={j} style={{ ...styles.td, textAlign: "right", ...(j === 7 ? styles.tdLast : {}) }}>
+                    <td key={j} style={{ ...styles.td, textAlign: "right", color: COLORS.text, ...(j === 7 ? styles.tdLast : {}) }}>
                       {v > 0 ? (
                         <span>{fmt(v)} {t && <span style={{ color: t.color, fontSize: 10, marginLeft: 4 }}>{t.icon}</span>}</span>
                       ) : (
@@ -363,7 +417,7 @@ function TVWeeklyCollections({ agents }) {
                     </td>
                   );
                 })}
-                <td style={{ ...styles.td, ...styles.tdLast, textAlign: "right", fontWeight: 700, color }}>{fmt(total)}</td>
+                <td style={{ ...styles.td, ...styles.tdLast, textAlign: "right", fontWeight: 700, color: BAR_CYAN }}>{fmt(total)}</td>
               </tr>
             );
           })}
@@ -374,13 +428,13 @@ function TVWeeklyCollections({ agents }) {
 }
 
 // ─── TV MODE CONTROLLER ───────────────────────────────────────────
-function TVMode({ agents, company, pipeline, onClose }) {
+function TVMode({ agents, company, pipeline, logo, onClose }) {
   const slides = [
     { component: <TVCompanyPerf company={company} agents={agents} pipeline={pipeline} />, duration: 15000 },
     { component: <TVAllAgents agents={agents} />, duration: 15000 },
     { component: <TVWeeklyCollections agents={agents} />, duration: 15000 },
     ...agents.filter((a) => a.collection > 0).sort((a, b) => b.collection - a.collection).map((a) => ({
-      component: <TVAgentDetail agent={a} index={agents.indexOf(a)} />,
+      component: <TVAgentDetail agent={a} company={company} />,
       duration: 5000,
     })),
   ];
@@ -407,9 +461,15 @@ function TVMode({ agents, company, pipeline, onClose }) {
     <div style={styles.tvOverlay}>
       <div style={styles.tvHeader}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={styles.logoIcon}>S</div>
-          <span style={{ ...styles.logoText, fontSize: 24 }}>Sales Dashboard</span>
+          {logo ? <img src={logo} alt="Logo" style={{ height: 36, objectFit: "contain" }} /> : <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${COLORS.accent}, #6366f1)`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: "#fff" }}>S</div>}
+          <span style={{ fontSize: 20, fontWeight: 700, background: `linear-gradient(135deg, ${COLORS.accent}, #a78bfa)`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Sales Dashboard</span>
         </div>
+        {/* Center logo */}
+        {logo && (
+          <div style={styles.navCenter}>
+            <img src={logo} alt="Company Logo" style={{ height: 40, objectFit: "contain" }} />
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span style={{ fontSize: 13, color: COLORS.textDim }}>Slide {current + 1} of {slides.length}</span>
           <span style={{ fontSize: 16, color: COLORS.accent }}>
@@ -450,7 +510,7 @@ function DataInputModal({ agents, onSave, onClose, type }) {
   return (
     <div style={styles.modal} onClick={onClose}>
       <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 700 }}>
+        <h3 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 700, color: COLORS.text }}>
           {type === "monthly" ? "Update Monthly Collections" : "Update Weekly Collections"}
         </h3>
         {type === "weekly" && (
@@ -464,7 +524,7 @@ function DataInputModal({ agents, onSave, onClose, type }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {data.map((d) => (
             <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ width: 90, fontWeight: 600, fontSize: 14 }}>{d.name}</span>
+              <span style={{ width: 90, fontWeight: 600, fontSize: 14, color: COLORS.text }}>{d.name}</span>
               <input
                 type="number"
                 style={styles.input}
@@ -495,9 +555,8 @@ function AgentModal({ agent, onSave, onClose }) {
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64 = reader.result;
-        setForm({ ...form, image: base64 });
-        setPreview(base64);
+        setForm({ ...form, image: reader.result });
+        setPreview(reader.result);
       };
       reader.readAsDataURL(file);
     }
@@ -512,7 +571,7 @@ function AgentModal({ agent, onSave, onClose }) {
   return (
     <div style={styles.modal} onClick={onClose}>
       <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 700 }}>{agent ? "Edit Agent" : "Add Agent"}</h3>
+        <h3 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 700, color: COLORS.text }}>{agent ? "Edit Agent" : "Add Agent"}</h3>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
             <label style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6, display: "block" }}>Name</label>
@@ -528,17 +587,8 @@ function AgentModal({ agent, onSave, onClose }) {
             ) : (
               <div style={{ width: 60, height: 60, borderRadius: "50%", background: COLORS.cardAlt, border: `2px dashed ${COLORS.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: COLORS.textDim, marginBottom: 8 }}>👤</div>
             )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleImageUpload}
-              style={{ display: "none" }}
-            />
-            <button
-              style={{ ...styles.btn(COLORS.purple), width: "100%", textAlign: "center" }}
-              onClick={() => fileInputRef.current?.click()}
-            >
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} style={{ display: "none" }} />
+            <button style={{ ...styles.btn(COLORS.purple), width: "100%", textAlign: "center" }} onClick={() => fileInputRef.current?.click()}>
               📷 {preview ? "Change Photo" : "Upload Photo"}
             </button>
           </div>
@@ -564,7 +614,7 @@ function PipelineModal({ pipeline, onSave, onClose }) {
   return (
     <div style={styles.modal} onClick={onClose}>
       <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 700 }}>Update Lead Pipeline</h3>
+        <h3 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 700, color: COLORS.text }}>Update Lead Pipeline</h3>
         {months.map((m) => (
           <div key={m} style={{ marginBottom: 20 }}>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, color: COLORS.accent }}>{labels[m]}</div>
@@ -603,6 +653,9 @@ function PipelineModal({ pipeline, onSave, onClose }) {
 
 // ─── MAIN APP ──────────────────────────────────────────────────────
 export default function SalesDashboard() {
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    try { return !!localStorage.getItem("sd_user"); } catch { return false; }
+  });
   const [page, setPage] = useState("dashboard");
   const [agents, setAgents] = useState(() => {
     try { const s = localStorage.getItem("sd_agents"); return s ? JSON.parse(s) : DEFAULT_AGENTS; } catch { return DEFAULT_AGENTS; }
@@ -613,8 +666,11 @@ export default function SalesDashboard() {
   const [pipeline, setPipeline] = useState(() => {
     try { const s = localStorage.getItem("sd_pipeline"); return s ? JSON.parse(s) : DEFAULT_PIPELINE; } catch { return DEFAULT_PIPELINE; }
   });
+  const [logo, setLogo] = useState(() => {
+    try { return localStorage.getItem("sd_logo") || ""; } catch { return ""; }
+  });
   const [tvMode, setTvMode] = useState(false);
-  const [modal, setModal] = useState(null); // { type: "monthly"|"weekly"|"agent"|"pipeline"|"company", agent?: obj }
+  const [modal, setModal] = useState(null);
 
   // Auto-launch TV mode if ?tv=true in URL
   useEffect(() => {
@@ -628,20 +684,35 @@ export default function SalesDashboard() {
   useEffect(() => { localStorage.setItem("sd_agents", JSON.stringify(agents)); }, [agents]);
   useEffect(() => { localStorage.setItem("sd_company", JSON.stringify(company)); }, [company]);
   useEffect(() => { localStorage.setItem("sd_pipeline", JSON.stringify(pipeline)); }, [pipeline]);
+  useEffect(() => { localStorage.setItem("sd_logo", logo); }, [logo]);
 
-  // Save handlers
+  const handleLogin = (user) => {
+    localStorage.setItem("sd_user", JSON.stringify(user));
+    setIsLoggedIn(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("sd_user");
+    setIsLoggedIn(false);
+  };
+
+  // Logo upload handler
+  const logoInputRef = useRef(null);
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setLogo(reader.result);
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleDataSave = (data, type) => {
     if (type === "monthly") {
-      setAgents((prev) => prev.map((a) => {
-        const d = data.find((x) => x.id === a.id);
-        return d ? { ...a, collection: d.collection } : a;
-      }));
+      setAgents((prev) => prev.map((a) => { const d = data.find((x) => x.id === a.id); return d ? { ...a, collection: d.collection } : a; }));
     }
     if (type === "weekly") {
-      setAgents((prev) => prev.map((a) => {
-        const d = data.find((x) => x.id === a.id);
-        return d ? { ...a, weekly: d.weekly } : a;
-      }));
+      setAgents((prev) => prev.map((a) => { const d = data.find((x) => x.id === a.id); return d ? { ...a, weekly: d.weekly } : a; }));
     }
     setModal(null);
   };
@@ -661,44 +732,41 @@ export default function SalesDashboard() {
     }
   };
 
+  // Show login if not authenticated (skip for TV mode via URL)
+  if (!isLoggedIn && !tvMode) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   // Computed values
   const totalCollection = agents.reduce((s, a) => s + a.collection, 0);
-  const totalApr = agents.reduce((s, a) => s + a.apr, 0);
-  const yearlyDone = totalApr + totalCollection;
   const q2Pct = pct(totalCollection, company.q2Target);
+  const q1Pct = pct(company.q1Done, company.q1Target);
   const sorted = [...agents].sort((a, b) => b.collection - a.collection);
 
   if (tvMode) {
-    return <TVMode agents={agents} company={company} pipeline={pipeline} onClose={() => setTvMode(false)} />;
+    return <TVMode agents={agents} company={company} pipeline={pipeline} logo={logo} onClose={() => setTvMode(false)} />;
   }
 
   // ─── DASHBOARD PAGE ──────────────────────────────────────────────
   const DashboardPage = () => (
     <div style={styles.page}>
-      {/* Summary Cards */}
-      <div style={{ ...styles.grid(5), marginBottom: 20 }}>
-        <SummaryCard title="Yearly Target" value={`${fmt(company.yearlyTarget)}`} subtitle="QAR" icon="🎯" />
-        <SummaryCard title="Year-to-Date" value={`${fmt(yearlyDone)}`} subtitle={`${pct(yearlyDone, company.yearlyTarget)}% achieved`} icon="📈" color={COLORS.success} />
-        <SummaryCard title="Q2 Target" value={`${fmt(company.q2Target)}`} subtitle="QAR" icon="📅" color={COLORS.purple} />
+      <div style={{ ...styles.grid(4), marginBottom: 20 }}>
+        <SummaryCard title="Q1 Result" value={`${fmt(company.q1Done)}`} subtitle={`Target: ${fmt(company.q1Target)} QAR (${q1Pct}%)`} icon="📅" color={COLORS.purple} />
+        <SummaryCard title="Q2 Target" value={`${fmt(company.q2Target)}`} subtitle="QAR" icon="📅" color={COLORS.accent} />
         <SummaryCard title="Q2 Collection" value={`${fmt(totalCollection)}`} subtitle={`${q2Pct}% of target`} icon="💰" color={COLORS.gold} />
         <SummaryCard title="Agents" value={agents.length} subtitle={`${agents.filter((a) => a.collection > 0).length} active`} icon="👥" color={COLORS.pink} />
       </div>
-
       <div style={{ ...styles.grid(2), marginBottom: 20 }}>
-        {/* Agent Rankings */}
         <div style={styles.card}>
           <div style={{ ...styles.cardTitle, justifyContent: "space-between" }}>
             <span>🏆 Agent Monthly Collections</span>
             <span style={{ fontSize: 11, color: COLORS.textDim }}>Target: QAR 40,000</span>
           </div>
           <div style={{ maxHeight: 520, overflowY: "auto" }}>
-            {sorted.map((a, i) => <AgentTargetBar key={a.id} agent={a} index={agents.indexOf(a)} />)}
+            {sorted.map((a) => <AgentTargetBar key={a.id} agent={a} />)}
           </div>
         </div>
-
-        {/* Charts Stack */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {/* Quarterly */}
           <div style={styles.card}>
             <div style={styles.cardTitle}>📊 Quarterly Performance</div>
             <ResponsiveContainer width="100%" height={220}>
@@ -713,12 +781,11 @@ export default function SalesDashboard() {
                 <YAxis stroke={COLORS.textDim} fontSize={11} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                 <Tooltip contentStyle={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.text }} formatter={(v) => `${fmt(v)} QAR`} />
                 <Legend />
-                <Bar dataKey="target" fill="#334155" name="Target" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="done" fill={COLORS.accent} name="Collected" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="target" fill={BAR_GREY} name="Target" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="done" fill={BAR_CYAN} name="Collected" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-          {/* Lead Pipeline */}
           <div style={styles.card}>
             <div style={styles.cardTitle}>🔄 Lead Pipeline (Last 3 Months)</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
@@ -729,7 +796,7 @@ export default function SalesDashboard() {
               ].map((d) => (
                 <div key={d.label} style={{ background: COLORS.cardAlt, borderRadius: 10, padding: 14, textAlign: "center" }}>
                   <div style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6 }}>{d.label}</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: COLORS.accent }}>{fmt(d.leads)}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: BAR_CYAN }}>{fmt(d.leads)}</div>
                   <div style={{ fontSize: 11, color: COLORS.textDim }}>leads</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: COLORS.success, marginTop: 4 }}>{d.sales}</div>
                   <div style={{ fontSize: 11, color: COLORS.textDim }}>sales</div>
@@ -740,8 +807,6 @@ export default function SalesDashboard() {
           </div>
         </div>
       </div>
-
-      {/* Weekly Collections */}
       <div style={styles.card}>
         <div style={styles.cardTitle}>📅 Weekly Agent Collections</div>
         <div style={{ overflowX: "auto" }}>
@@ -756,19 +821,18 @@ export default function SalesDashboard() {
             <tbody>
               {sorted.map((a) => {
                 const total = (a.weekly || []).reduce((s, v) => s + v, 0);
-                const color = AGENT_COLORS[agents.indexOf(a) % AGENT_COLORS.length];
                 return (
                   <tr key={a.id}>
-                    <td style={{ ...styles.td, ...styles.tdFirst, fontWeight: 600 }}>
-                      <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: color, marginRight: 8 }} />
+                    <td style={{ ...styles.td, ...styles.tdFirst, fontWeight: 600, color: "#f1f5f9" }}>
+                      <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: BAR_CYAN, marginRight: 8 }} />
                       {a.name}
                     </td>
                     {(a.weekly || []).map((v, j) => (
-                      <td key={j} style={{ ...styles.td, textAlign: "right" }}>
+                      <td key={j} style={{ ...styles.td, textAlign: "right", color: COLORS.text }}>
                         {v > 0 ? fmt(v) : <span style={{ color: COLORS.textDim }}>—</span>}
                       </td>
                     ))}
-                    <td style={{ ...styles.td, ...styles.tdLast, textAlign: "right", fontWeight: 700, color }}>{fmt(total)}</td>
+                    <td style={{ ...styles.td, ...styles.tdLast, textAlign: "right", fontWeight: 700, color: BAR_CYAN }}>{fmt(total)}</td>
                   </tr>
                 );
               })}
@@ -783,17 +847,16 @@ export default function SalesDashboard() {
   const SettingsPage = () => (
     <div style={styles.page}>
       <div style={{ ...styles.grid(2), marginBottom: 20 }}>
-        {/* Agent Management */}
         <div style={styles.card}>
           <div style={{ ...styles.cardTitle, justifyContent: "space-between" }}>
             <span>👥 Agent Management</span>
             <button style={styles.btn()} onClick={() => setModal({ type: "agent" })}>+ Add Agent</button>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {agents.map((a, i) => (
+            {agents.map((a) => (
               <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 8, background: COLORS.cardAlt }}>
-                {a.image ? <img src={a.image} alt={a.name} style={styles.avatarImg} /> : <div style={styles.avatar(AGENT_COLORS[i % AGENT_COLORS.length])}>{getInitials(a.name)}</div>}
-                <span style={{ flex: 1, fontWeight: 600 }}>{a.name}</span>
+                {a.image ? <img src={a.image} alt={a.name} style={styles.avatarImg} /> : <div style={styles.avatar}>{getInitials(a.name)}</div>}
+                <span style={{ flex: 1, fontWeight: 600, color: COLORS.text }}>{a.name}</span>
                 <span style={{ fontSize: 13, color: COLORS.textDim }}>Target: {fmt(a.target)} QAR</span>
                 <button style={{ ...styles.btnOutline, padding: "4px 12px" }} onClick={() => setModal({ type: "agent", agent: a })}>Edit</button>
                 <button style={{ ...styles.btn(COLORS.danger), padding: "4px 12px" }} onClick={() => handleDeleteAgent(a.id)}>✕</button>
@@ -801,9 +864,23 @@ export default function SalesDashboard() {
             ))}
           </div>
         </div>
-
-        {/* Data Input */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Logo Upload */}
+          <div style={styles.card}>
+            <div style={styles.cardTitle}>🖼️ Company Logo</div>
+            <p style={{ fontSize: 13, color: COLORS.textDim, margin: "0 0 12px" }}>Upload your company logo. It will appear in the navigation bar and TV mode.</p>
+            {logo && (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                <img src={logo} alt="Logo" style={{ height: 50, objectFit: "contain", background: COLORS.cardAlt, borderRadius: 8, padding: 8 }} />
+                <button style={{ ...styles.btn(COLORS.danger), padding: "6px 14px", fontSize: 12 }} onClick={() => setLogo("")}>Remove</button>
+              </div>
+            )}
+            <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} style={{ display: "none" }} />
+            <button style={{ ...styles.btn(COLORS.purple), width: "100%", textAlign: "center" }} onClick={() => logoInputRef.current?.click()}>
+              📷 {logo ? "Change Logo" : "Upload Logo"}
+            </button>
+          </div>
+
           <div style={styles.card}>
             <div style={styles.cardTitle}>📝 Data Input</div>
             <p style={{ fontSize: 13, color: COLORS.textDim, margin: "0 0 16px" }}>Use these forms to update agent collections and company data.</p>
@@ -815,17 +892,12 @@ export default function SalesDashboard() {
           </div>
 
           <div style={styles.card}>
-            <div style={styles.cardTitle}>🏢 Company Targets</div>
+            <div style={styles.cardTitle}>🏢 Quarterly Targets</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              {["yearlyTarget", "q1Target", "q2Target", "q3Target", "q4Target", "q1Done", "q3Done", "q4Done"].map((k) => (
+              {["q1Target", "q2Target", "q3Target", "q4Target", "q1Done", "q3Done", "q4Done"].map((k) => (
                 <div key={k}>
                   <label style={{ fontSize: 11, color: COLORS.textDim, marginBottom: 4, display: "block" }}>{k.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase())}</label>
-                  <input
-                    type="number"
-                    style={styles.input}
-                    value={company[k]}
-                    onChange={(e) => setCompany({ ...company, [k]: Number(e.target.value) || 0 })}
-                  />
+                  <input type="number" style={styles.input} value={company[k]} onChange={(e) => setCompany({ ...company, [k]: Number(e.target.value) || 0 })} />
                 </div>
               ))}
             </div>
@@ -840,24 +912,12 @@ export default function SalesDashboard() {
             <div style={{ background: COLORS.cardAlt, borderRadius: 8, padding: 14, border: `1px solid ${COLORS.border}` }}>
               <div style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6 }}>📎 Share this link with the TV operator:</div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  type="text"
-                  readOnly
-                  value={`${window.location.origin}${window.location.pathname}?tv=true`}
-                  style={{ ...styles.input, fontSize: 12, flex: 1 }}
-                  onClick={(e) => e.target.select()}
-                />
-                <button
-                  style={{ ...styles.btn(), padding: "10px 14px", whiteSpace: "nowrap" }}
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?tv=true`);
-                    alert("TV link copied to clipboard!");
-                  }}
-                >
+                <input type="text" readOnly value={`${window.location.origin}${window.location.pathname}?tv=true`} style={{ ...styles.input, fontSize: 12, flex: 1 }} onClick={(e) => e.target.select()} />
+                <button style={{ ...styles.btn(), padding: "10px 14px", whiteSpace: "nowrap" }} onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?tv=true`); alert("TV link copied!"); }}>
                   📋 Copy
                 </button>
               </div>
-              <p style={{ fontSize: 11, color: COLORS.textDim, margin: "8px 0 0" }}>Opening this link will automatically start the TV slideshow mode. Press ESC or click "Exit TV" to return to the dashboard.</p>
+              <p style={{ fontSize: 11, color: COLORS.textDim, margin: "8px 0 0" }}>Opening this link auto-starts the TV slideshow. Press ESC or click "Exit TV" to return.</p>
             </div>
           </div>
         </div>
@@ -867,23 +927,25 @@ export default function SalesDashboard() {
 
   return (
     <div style={styles.app}>
-      {/* Navigation */}
-      <nav style={styles.nav}>
-        <div style={styles.logo}>
-          <div style={styles.logoIcon}>S</div>
-          <span style={styles.logoText}>Sales Dashboard</span>
+      <nav style={{ ...styles.nav, position: "relative" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {logo ? <img src={logo} alt="Logo" style={{ height: 32, objectFit: "contain" }} /> : <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${COLORS.accent}, #6366f1)`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: "#fff" }}>S</div>}
+          <span style={{ fontSize: 20, fontWeight: 700, background: `linear-gradient(135deg, ${COLORS.accent}, #a78bfa)`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Sales Dashboard</span>
         </div>
+        {/* Center logo */}
+        {logo && (
+          <div style={styles.navCenter}>
+            <img src={logo} alt="Company Logo" style={{ height: 36, objectFit: "contain" }} />
+          </div>
+        )}
         <div style={styles.navBtns}>
           <button style={styles.navBtn(page === "dashboard")} onClick={() => setPage("dashboard")}>📊 Dashboard</button>
           <button style={styles.navBtn(page === "settings")} onClick={() => setPage("settings")}>⚙️ Settings</button>
           <button style={{ ...styles.navBtn(false), background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff" }} onClick={() => setTvMode(true)}>📺 TV Mode</button>
+          <button style={{ ...styles.navBtn(false), color: COLORS.danger }} onClick={handleLogout}>🚪 Logout</button>
         </div>
       </nav>
-
-      {/* Page Content */}
       {page === "dashboard" ? <DashboardPage /> : <SettingsPage />}
-
-      {/* Modals */}
       {modal?.type === "monthly" && <DataInputModal agents={agents} onSave={handleDataSave} onClose={() => setModal(null)} type="monthly" />}
       {modal?.type === "weekly" && <DataInputModal agents={agents} onSave={handleDataSave} onClose={() => setModal(null)} type="weekly" />}
       {modal?.type === "agent" && <AgentModal agent={modal.agent} onSave={handleAgentSave} onClose={() => setModal(null)} />}
