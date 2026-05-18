@@ -60,11 +60,13 @@ function getMonthFromThursday(d) {
   return d.getMonth(); // 0-indexed: 3=Apr, 4=May, 5=Jun for Q2
 }
 
-const YEAR = 2026;
-const QUARTER = 2; // Q2: Apr, May, Jun
+const YEAR = new Date().getFullYear();
+const QUARTER = getCurrentQuarter();
 const THURSDAYS = getQuarterThursdays(YEAR, QUARTER);
 const THURSDAY_LABELS = THURSDAYS.map(formatThursday);
 const NUM_WEEKS = THURSDAYS.length;
+const QUARTER_MONTHS = [(QUARTER-1)*3, (QUARTER-1)*3+1, (QUARTER-1)*3+2]; // e.g. Q2 = [3,4,5]
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 // ─── DEFAULT DATA ──────────────────────────────────────────────────
 const makeEmptyWeeks = () => new Array(NUM_WEEKS).fill(0);
@@ -105,22 +107,23 @@ const getMonthlySales = (agent) => (agent.weeklySales || []).reduce((s, w) => s 
 
 // Get monthly breakdown by month index (3=Apr, 4=May, 5=Jun)
 const getMonthBreakdown = (agent, field) => {
-  const result = { 3: 0, 4: 0, 5: 0 }; // Apr, May, Jun
+  const result = {};
+  QUARTER_MONTHS.forEach(m => result[m] = 0);
   THURSDAYS.forEach((t, i) => {
     const m = getMonthFromThursday(t);
-    if (field === "leads") result[m] += (agent.weeklyLeads || [])[i] || 0;
-    else if (field === "collections") result[m] += (agent.weeklyCollections || [])[i] || 0;
-    else if (field === "sales") result[m] += ((agent.weeklySales || [])[i] || {}).total || 0;
+    if (field === "leads") result[m] = (result[m]||0) + ((agent.weeklyLeads || [])[i] || 0);
+    else if (field === "collections") result[m] = (result[m]||0) + ((agent.weeklyCollections || [])[i] || 0);
+    else if (field === "sales") result[m] = (result[m]||0) + (((agent.weeklySales || [])[i] || {}).total || 0);
   });
   return result;
 };
 
 // Auto-calculate company pipeline from agent data
 const calcPipeline = (agents) => {
-  const months = [3, 4, 5];
-  const labels = { 3: "apr", 4: "may", 5: "jun" };
+  const labels = {};
+  QUARTER_MONTHS.forEach(m => labels[m] = MONTH_NAMES[m].toLowerCase());
   const result = {};
-  months.forEach(m => {
+  QUARTER_MONTHS.forEach(m => {
     let leads = 0, sales = 0;
     agents.forEach(a => {
       leads += getMonthBreakdown(a, "leads")[m] || 0;
@@ -229,10 +232,10 @@ function TVAgent({ agent, idx, company }) {
   const p = pct(col, agent.target);
   const qTarget = agent.target * 3;
   const mb = getMonthBreakdown(agent, "collections");
-  const qDone = (mb[3]||0) + (mb[4]||0) + (mb[5]||0);
+  const qDone = QUARTER_MONTHS.reduce((s, m) => s + (mb[m]||0), 0);
   const qPct = pct(qDone, qTarget);
   const ratio = leads > 0 ? Math.round((sales / leads) * 100) : 0;
-  const monthData = [{ name: "Apr", collection: mb[3]||0 }, { name: "May", collection: mb[4]||0 }, { name: "Jun", collection: mb[5]||0 }];
+  const monthData = QUARTER_MONTHS.map(m => ({ name: MONTH_NAMES[m], collection: mb[m]||0 }));
   const weekData = (agent.weeklyCollections||[]).map((v, i) => ({ name: THURSDAY_LABELS[i], value: v }));
 
   return (
@@ -282,7 +285,7 @@ function TVCompany({ company, agents }) {
   const total = agents.reduce((s, a) => s + getMonthlyCollection(a), 0);
   const pipeline = calcPipeline(agents);
   const q2Pct = pct(total, company.q2Target);
-  const pipeData = [{ name: "Apr", ...pipeline.apr }, { name: "May", ...pipeline.may }, { name: "Jun", ...pipeline.jun }];
+  const pipeData = QUARTER_MONTHS.map(m => ({ name: MONTH_NAMES[m], ...(pipeline[MONTH_NAMES[m].toLowerCase()] || { leads: 0, sales: 0, ratio: 0 }) }));
   const qData = [{ name: "Q1", target: company.q1Target, done: company.q1Done }, { name: "Q2", target: company.q2Target, done: total }, { name: "Q3", target: company.q3Target, done: company.q3Done }, { name: "Q4", target: company.q4Target, done: company.q4Done }];
   return (
     <div style={{ width: "100%", maxWidth: 1600 }}>
@@ -431,25 +434,11 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
   })));
   const [wi, setWi] = useState(getCurrentWeekIndex(THURSDAYS));
 
-  // When week changes, auto-calculate Previous from last week's Current
-  const handleWeekChange = (newWi) => {
-    setWi(newWi);
-    if (newWi > 0) {
-      setData(prev => prev.map(d => {
-        const sales = d.weeklySales.map((s, j) => {
-          if (j === newWi && d.weeklySales[newWi - 1]) {
-            const prevCurrent = d.weeklySales[newWi - 1].current || 0;
-            // Only auto-set if prev is still 0 (not manually edited)
-            if (s.prev === 0 && prevCurrent > 0) {
-              const newTotal = (s.current || 0) - prevCurrent;
-              return { prev: prevCurrent, current: s.current, total: Math.max(newTotal, 0) };
-            }
-          }
-          return s;
-        });
-        return { ...d, weeklySales: sales };
-      }));
-    }
+  // Get auto-calculated Previous for an agent at a given week
+  // Previous = last week's Current entry
+  const getAutoPrev = (agentData, weekIdx) => {
+    if (weekIdx <= 0) return 0;
+    return agentData.weeklySales[weekIdx - 1]?.current || 0;
   };
 
   const handleSalesCurrentChange = (id, val) => {
@@ -458,7 +447,7 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
       const sales = d.weeklySales.map((s, j) => {
         if (j !== wi) return s;
         const current = Number(val) || 0;
-        const prevVal = s.prev || 0;
+        const prevVal = getAutoPrev(d, wi);
         const total = current - prevVal;
         return { prev: prevVal, current, total: Math.max(total, 0) };
       });
@@ -466,21 +455,25 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
     }));
   };
 
-  const handleSalesPrevChange = (id, val) => {
-    setData(prev => prev.map(d => {
-      if (d.id !== id) return d;
+  // When saving, ensure all Previous values are correctly set from prior week's Current
+  const handleSave = () => {
+    const fixed = data.map(d => {
       const sales = d.weeklySales.map((s, j) => {
-        if (j !== wi) return s;
-        const prevVal = Number(val) || 0;
+        const prevVal = j > 0 ? (d.weeklySales[j - 1]?.current || 0) : 0;
         const total = (s.current || 0) - prevVal;
-        return { prev: prevVal, current: s.current, total: Math.max(total, 0) };
+        return { prev: prevVal, current: s.current || 0, total: Math.max(total, 0) };
       });
       return { ...d, weeklySales: sales };
-    }));
+    });
+    onSave(fixed);
   };
 
   const totalCol = data.reduce((s, d) => s + (d.weeklyCollections[wi] || 0), 0);
-  const totalSales = data.reduce((s, d) => s + ((d.weeklySales[wi] || {}).total || 0), 0);
+  const totalSales = data.reduce((s, d) => {
+    const prevVal = getAutoPrev(d, wi);
+    const current = d.weeklySales[wi]?.current || 0;
+    return s + Math.max(current - prevVal, 0);
+  }, 0);
 
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mcWide} onClick={e => e.stopPropagation()}>
@@ -488,7 +481,7 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
       <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Finance Department</p>
       <div style={{ marginBottom: 16 }}>
         <label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Week Ending (Thursday)</label>
-        <select style={ST.sel} value={wi} onChange={e => handleWeekChange(Number(e.target.value))}>
+        <select style={ST.sel} value={wi} onChange={e => setWi(Number(e.target.value))}>
           {THURSDAYS.map((t, i) => <option key={i} value={i}>Week ending {formatThursdayFull(t)}</option>)}
         </select>
       </div>
@@ -523,13 +516,15 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {data.map(d => {
-              const s = d.weeklySales[wi] || { prev: 0, current: 0, total: 0 };
+              const autoPrev = getAutoPrev(d, wi);
+              const currentVal = d.weeklySales[wi]?.current || 0;
+              const totalVal = Math.max(currentVal - autoPrev, 0);
               return (
                 <div key={d.id} style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr 1fr", gap: 4, alignItems: "center" }}>
                   <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{d.name}</span>
-                  <input type="number" style={ST.inputSm} value={s.prev || ""} placeholder="0" onChange={e => handleSalesPrevChange(d.id, e.target.value)} />
-                  <input type="number" style={ST.inputSm} value={s.current || ""} placeholder="0" onChange={e => handleSalesCurrentChange(d.id, e.target.value)} />
-                  <input type="text" style={ST.inputDisabled} value={fmt(s.total || 0)} readOnly />
+                  <input type="text" style={ST.inputDisabled} value={fmt(autoPrev)} readOnly title="Auto-filled from last week's Current" />
+                  <input type="number" style={ST.inputSm} value={currentVal || ""} placeholder="0" onChange={e => handleSalesCurrentChange(d.id, e.target.value)} />
+                  <input type="text" style={ST.inputDisabled} value={fmt(totalVal)} readOnly />
                 </div>
               );
             })}
@@ -543,7 +538,7 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
         <button style={ST.btnO} onClick={onClose}>Cancel</button>
-        <button style={ST.btn()} onClick={() => onSave(data)}>Save</button>
+        <button style={ST.btn()} onClick={handleSave}>Save</button>
       </div>
     </div></div>
   );
@@ -552,7 +547,7 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
 // ─── MODAL: PIPELINE (read-only, auto-calculated) ──────────────────
 function PipelineViewModal({ agents, onClose }) {
   const pipeline = calcPipeline(agents);
-  const months = [{ key: "apr", label: "April 2026" }, { key: "may", label: "May 2026" }, { key: "jun", label: "June 2026" }];
+  const months = QUARTER_MONTHS.map(m => ({ key: MONTH_NAMES[m].toLowerCase(), label: `${MONTH_NAMES[m]} ${YEAR}` }));
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mc} onClick={e => e.stopPropagation()}>
       <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>📊 Company Lead Pipeline</h3>
@@ -708,14 +703,14 @@ export default function SalesDashboard() {
           <div style={ST.card}>
             <div style={ST.title}>🔄 Lead Pipeline (Auto-calculated)</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-              {[{ label: "April", ...pipeline.apr }, { label: "May", ...pipeline.may }, { label: "June", ...pipeline.jun }].map(d => (
-                <div key={d.label} style={{ background: C.cardAlt, borderRadius: 10, padding: 14, textAlign: "center" }}>
-                  <div style={{ fontSize: 12, color: C.textDim, marginBottom: 6 }}>{d.label}</div>
+              {QUARTER_MONTHS.map(m => { const key = MONTH_NAMES[m].toLowerCase(); const d = pipeline[key] || { leads: 0, sales: 0, ratio: 0 }; return (
+                <div key={m} style={{ background: C.cardAlt, borderRadius: 10, padding: 14, textAlign: "center" }}>
+                  <div style={{ fontSize: 12, color: C.textDim, marginBottom: 6 }}>{MONTH_NAMES[m]}</div>
                   <div style={{ fontSize: 20, fontWeight: 800, color: C.accent }}>{fmt(d.leads)}</div><div style={{ fontSize: 11, color: C.textDim }}>leads</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: C.success, marginTop: 4 }}>{d.sales}</div><div style={{ fontSize: 11, color: C.textDim }}>sales</div>
                   <div style={{ marginTop: 6, ...ST.badge(d.ratio >= 5 ? C.success : C.warning) }}>{d.ratio}% close rate</div>
                 </div>
-              ))}
+              ); })}
             </div>
           </div>
         </div>
