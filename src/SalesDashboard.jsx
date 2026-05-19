@@ -194,6 +194,25 @@ const trend = (cur, prev) => {
 };
 
 // ─── STYLES ────────────────────────────────────────────────────────
+// Inject keyframe animation for gold shimmer
+if (typeof document !== 'undefined' && !document.getElementById('sd-animations')) {
+  const styleEl = document.createElement('style');
+  styleEl.id = 'sd-animations';
+  styleEl.textContent = `
+    @keyframes goldShimmer {
+      0% { box-shadow: 0 0 4px rgba(251,191,36,0.2); }
+      50% { box-shadow: 0 0 12px rgba(251,191,36,0.4), 0 0 24px rgba(251,191,36,0.1); }
+      100% { box-shadow: 0 0 4px rgba(251,191,36,0.2); }
+    }
+    @keyframes starPulse {
+      0% { transform: scale(1); opacity: 0.8; }
+      50% { transform: scale(1.2); opacity: 1; }
+      100% { transform: scale(1); opacity: 0.8; }
+    }
+  `;
+  document.head.appendChild(styleEl);
+}
+
 const ST = {
   app: { minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "Arial, Helvetica, sans-serif" },
   nav: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 24px", background: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)", borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 100 },
@@ -240,18 +259,29 @@ function AgentBar({ agent, idx }) {
   const c = tri(idx);
   const col = getMonthlyCollection(agent);
   const p = pct(col, agent.target);
+  const exceeded = col > agent.target;
+  const diff = agent.target - col;
+  const shimmerStyle = exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite', borderLeft: `3px solid ${C.gold}` } : {};
   return (
-    <div style={ST.row(c)}>
+    <div style={{ ...ST.row(exceeded ? C.gold : c), ...shimmerStyle }}>
       {agent.image ? <img src={agent.image} alt={agent.name} style={ST.avImg} /> : <div style={ST.av(c)}>{initials(agent.name)}</div>}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <span style={{ fontWeight: 600, fontSize: 14, color: "#f1f5f9" }}>{agent.name}</span>
-          <span style={{ fontWeight: 700, fontSize: 14, color: c }}>{fmt(col)} QAR</span>
+          <span style={{ fontWeight: 600, fontSize: 14, color: "#f1f5f9" }}>
+            {agent.name} {exceeded && <span style={{ animation: 'starPulse 2s ease-in-out infinite', display: 'inline-block', fontSize: 12 }}>⭐</span>}
+          </span>
+          <span style={{ fontWeight: 700, fontSize: 14, color: exceeded ? C.gold : c }}>{fmt(col)} QAR</span>
         </div>
-        <div style={ST.barBg}><div style={ST.barFill(p, c)} /></div>
+        <div style={ST.barBg}><div style={ST.barFill(p, exceeded ? C.gold : c)} /></div>
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 11, color: C.textDim }}>
           <span style={{ color: "#94a3b8" }}>Target: {fmt(agent.target)} QAR</span>
-          <span style={{ color: col >= agent.target ? C.success : C.danger }}>Diff: {fmt(agent.target - col)} QAR</span>
+          {exceeded ? (
+            <span style={{ color: C.success, fontWeight: 600 }}>🎯 +{fmt(Math.abs(diff))} QAR exceeded</span>
+          ) : col === agent.target ? (
+            <span style={{ color: C.success, fontWeight: 600 }}>✓ Target reached!</span>
+          ) : (
+            <span style={{ color: C.warning }}>{fmt(Math.abs(diff))} QAR remaining</span>
+          )}
         </div>
       </div>
     </div>
@@ -270,10 +300,14 @@ function TVAgent({ agent, idx, company }) {
   const leads = getMonthlyLeads(agent);
   const sales = getMonthlySales(agent);
   const p = pct(col, agent.target);
+  const exceeded = col > agent.target;
+  const diff = agent.target - col;
+  const ringColor = exceeded ? C.gold : c;
   const qTarget = agent.target * 3;
   const mb = getMonthBreakdown(agent, "collections");
   const qDone = QUARTER_MONTHS.reduce((s, m) => s + (mb[m]||0), 0);
   const qPct = pct(qDone, qTarget);
+  const qExceeded = qDone > qTarget;
   const ratio = leads > 0 ? Math.round((sales / leads) * 100) : 0;
   const monthData = QUARTER_MONTHS.map(m => ({ name: MONTH_NAMES[m], collection: mb[m]||0 }));
   const weekData = (agent.weeklyCollections||[]).map((v, i) => ({ name: THURSDAY_LABELS[i], value: v }));
@@ -281,21 +315,31 @@ function TVAgent({ agent, idx, company }) {
   return (
     <div style={{ width: "100%", maxWidth: 1400, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
-        {agent.image ? <img src={agent.image} alt={agent.name} style={{ width: 110, height: 110, borderRadius: "50%", border: `4px solid ${c}`, objectFit: "cover" }} /> : <div style={{ ...ST.av(c), width: 110, height: 110, fontSize: 36 }}>{initials(agent.name)}</div>}
-        <h2 style={{ fontSize: 32, fontWeight: 800, margin: 0, color: "#f1f5f9" }}>{agent.name}</h2>
-        <Ring percent={p} size={150} stroke={12} color={c} />
+        {agent.image ? <img src={agent.image} alt={agent.name} style={{ width: 110, height: 110, borderRadius: "50%", border: `4px solid ${exceeded ? C.gold : c}`, objectFit: "cover", ...(exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite' } : {}) }} /> : <div style={{ ...ST.av(c), width: 110, height: 110, fontSize: 36, ...(exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite', background: `linear-gradient(135deg, ${C.gold}, ${C.gold}88)` } : {}) }}>{initials(agent.name)}</div>}
+        <h2 style={{ fontSize: 32, fontWeight: 800, margin: 0, color: "#f1f5f9" }}>
+          {agent.name} {exceeded && <span style={{ animation: 'starPulse 2s ease-in-out infinite', display: 'inline-block' }}>⭐</span>}
+        </h2>
+        <Ring percent={Math.min(p, 100)} size={150} stroke={12} color={ringColor} />
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 13, color: C.textDim }}>Monthly Collection</div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: c }}>{fmt(col)} QAR</div>
-          <div style={{ fontSize: 13, color: C.textDim, marginTop: 2 }}>Diff: <span style={{ color: C.danger, fontWeight: 600 }}>{fmt(agent.target - col)} QAR</span></div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: exceeded ? C.gold : c }}>{fmt(col)} QAR</div>
+          {exceeded ? (
+            <div style={{ fontSize: 13, marginTop: 2 }}>
+              <span style={{ color: C.success, fontWeight: 600 }}>🎯 +{fmt(Math.abs(diff))} QAR exceeded target!</span>
+            </div>
+          ) : col === agent.target ? (
+            <div style={{ fontSize: 13, color: C.success, fontWeight: 600, marginTop: 2 }}>✓ Target reached!</div>
+          ) : (
+            <div style={{ fontSize: 13, color: C.warning, marginTop: 2 }}>{fmt(Math.abs(diff))} QAR remaining</div>
+          )}
         </div>
-        <div style={{ background: C.cardAlt, borderRadius: 12, padding: 14, width: "100%", maxWidth: 300, textAlign: "center", border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 11, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>Q2 Quarterly Target</div>
+        <div style={{ background: C.cardAlt, borderRadius: 12, padding: 14, width: "100%", maxWidth: 300, textAlign: "center", border: `1px solid ${qExceeded ? C.gold : C.border}`, ...(qExceeded ? { animation: 'goldShimmer 3s ease-in-out infinite' } : {}) }}>
+          <div style={{ fontSize: 11, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>Q{QUARTER} Quarterly Target</div>
           <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>{fmt(qTarget)} QAR</div>
-          <div style={{ ...ST.barBg, margin: "8px 0" }}><div style={ST.barFill(qPct, c)} /></div>
+          <div style={{ ...ST.barBg, margin: "8px 0" }}><div style={ST.barFill(Math.min(qPct, 100), qExceeded ? C.gold : c)} /></div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-            <span style={{ color: C.textDim }}>Done: <span style={{ color: c, fontWeight: 600 }}>{fmt(qDone)}</span></span>
-            <span style={{ color: qPct >= 50 ? C.success : C.warning, fontWeight: 700 }}>{qPct}%</span>
+            <span style={{ color: C.textDim }}>Done: <span style={{ color: qExceeded ? C.gold : c, fontWeight: 600 }}>{fmt(qDone)}</span></span>
+            <span style={{ color: qPct >= 100 ? C.gold : qPct >= 50 ? C.success : C.warning, fontWeight: 700 }}>{qPct}%</span>
           </div>
         </div>
         <div style={{ background: C.cardAlt, borderRadius: 12, padding: 14, width: "100%", maxWidth: 300, border: `1px solid ${C.border}` }}>
