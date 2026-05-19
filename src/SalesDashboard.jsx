@@ -713,8 +713,11 @@ export default function SalesDashboard() {
   useEffect(() => { const u = onAuthStateChanged(auth, u => { setLoggedIn(!!u); setAuthLoading(false); }); return () => u(); }, []);
   useEffect(() => { const p = new URLSearchParams(window.location.search); if (p.get("tv") === "true") setTvMode(true); }, []);
 
-  // Load data via real-time listeners (handles both initial load and live updates)
+  // FIX: Only start Firestore listeners AFTER user is logged in
+  // This prevents "Missing or insufficient permissions" errors
   useEffect(() => {
+    if (!loggedIn) return;
+
     let initialLoadDone = false;
 
     const unsubs = [
@@ -745,7 +748,7 @@ export default function SalesDashboard() {
       }),
     ];
     return () => unsubs.forEach(u => u());
-  }, []);
+  }, [loggedIn]);
 
   // Save with error handling
   const saveAgents = async (a) => {
@@ -792,8 +795,14 @@ export default function SalesDashboard() {
 
   const handleDeleteAgent = (id) => { if (window.confirm("Remove this agent?")) saveAgents(agents.filter(a => a.id !== id)); };
 
-  if (authLoading || !dataLoaded) return (<div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ textAlign: "center" }}><div style={{ width: 60, height: 60, borderRadius: 14, background: `linear-gradient(135deg, ${C.accent}, #6366f1)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: "#fff", marginBottom: 16 }}>S</div><div style={{ color: C.textDim, fontSize: 14 }}>Loading...</div></div></div>);
+  // FIX: Show loading only while checking auth status
+  if (authLoading) return (<div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ textAlign: "center" }}><div style={{ width: 60, height: 60, borderRadius: 14, background: `linear-gradient(135deg, ${C.accent}, #6366f1)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: "#fff", marginBottom: 16 }}>S</div><div style={{ color: C.textDim, fontSize: 14 }}>Loading...</div></div></div>);
+
+  // FIX: Show login BEFORE trying to load Firestore data
   if (!loggedIn && !tvMode) return <Login onLogin={() => setLoggedIn(true)} />;
+
+  // FIX: Show loading while Firestore data is being fetched (after login)
+  if (!dataLoaded) return (<div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ textAlign: "center" }}><div style={{ width: 60, height: 60, borderRadius: 14, background: `linear-gradient(135deg, ${C.accent}, #6366f1)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: "#fff", marginBottom: 16 }}>S</div><div style={{ color: C.textDim, fontSize: 14 }}>Loading dashboard data...</div></div></div>);
 
   const totalCol = agents.reduce((s, a) => s + getMonthlyCollection(a), 0);
   const q2Pct = pct(totalCol, company.q2Target);
