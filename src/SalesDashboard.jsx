@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, AreaChart, Area } from "recharts";
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "firebase/auth";
-import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
+import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
 
 // ─── FIREBASE ──────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -608,46 +608,63 @@ export default function SalesDashboard() {
   useEffect(() => { const u = onAuthStateChanged(auth, u => { setLoggedIn(!!u); setAuthLoading(false); }); return () => u(); }, []);
   useEffect(() => { const p = new URLSearchParams(window.location.search); if (p.get("tv") === "true") setTvMode(true); }, []);
 
-  // Load from Firestore
+  // Load data via real-time listeners (handles both initial load and live updates)
   useEffect(() => {
-    const load = async () => {
-      try {
-        const [aSnap, cSnap, lSnap] = await Promise.all([
-          getDoc(doc(db, "dashboard", "agents")),
-          getDoc(doc(db, "dashboard", "company")),
-          getDoc(doc(db, "dashboard", "logo")),
-        ]);
-        if (aSnap.exists()) {
-          const list = aSnap.data().list.map(a => ({
+    let initialLoadDone = false;
+
+    const unsubs = [
+      onSnapshot(doc(db, "dashboard", "agents"), async (snap) => {
+        if (snap.exists()) {
+          const list = snap.data().list.map(a => ({
             ...a,
             weeklyLeads: a.weeklyLeads || makeEmptyWeeks(),
             weeklyCollections: a.weeklyCollections || makeEmptyWeeks(),
             weeklySales: a.weeklySales || makeEmptySales(),
           }));
           setAgents(list);
+        } else if (!initialLoadDone) {
+          // First time: no data in Firestore, save defaults
+          try { await setDoc(doc(db, "dashboard", "agents"), { list: DEFAULT_AGENTS }); } catch(e) { console.error("Init agents:", e); }
         }
-        if (cSnap.exists()) setCompany(cSnap.data());
-        if (lSnap.exists()) setLogo(lSnap.data().url || "");
-      } catch (e) { console.error("Load:", e); }
-      setDataLoaded(true);
-    };
-    load();
-  }, []);
-
-  // Real-time listeners
-  useEffect(() => {
-    const unsubs = [
-      onSnapshot(doc(db, "dashboard", "agents"), s => { if (s.exists()) { const list = s.data().list.map(a => ({ ...a, weeklyLeads: a.weeklyLeads || makeEmptyWeeks(), weeklyCollections: a.weeklyCollections || makeEmptyWeeks(), weeklySales: a.weeklySales || makeEmptySales() })); setAgents(list); } }),
-      onSnapshot(doc(db, "dashboard", "company"), s => { if (s.exists()) setCompany(s.data()); }),
-      onSnapshot(doc(db, "dashboard", "logo"), s => { if (s.exists()) setLogo(s.data().url || ""); }),
+        if (!initialLoadDone) { initialLoadDone = true; setDataLoaded(true); }
+      }),
+      onSnapshot(doc(db, "dashboard", "company"), async (snap) => {
+        if (snap.exists()) {
+          setCompany(snap.data());
+        } else {
+          try { await setDoc(doc(db, "dashboard", "company"), DEFAULT_COMPANY); } catch(e) { console.error("Init company:", e); }
+        }
+      }),
+      onSnapshot(doc(db, "dashboard", "logo"), (snap) => {
+        if (snap.exists()) setLogo(snap.data().url || "");
+      }),
     ];
     return () => unsubs.forEach(u => u());
   }, []);
 
-  // Save
-  const saveAgents = async (a) => { setAgents(a); setSaving(true); try { await setDoc(doc(db, "dashboard", "agents"), { list: a }); } catch(e) { console.error(e); } setSaving(false); };
-  const saveCompany = async (c) => { setCompany(c); try { await setDoc(doc(db, "dashboard", "company"), c); } catch(e) { console.error(e); } };
-  const saveLogo = async (u) => { setLogo(u); try { await setDoc(doc(db, "dashboard", "logo"), { url: u }); } catch(e) { console.error(e); } };
+  // Save with error handling
+  const saveAgents = async (a) => {
+    setAgents(a);
+    setSaving(true);
+    try {
+      await setDoc(doc(db, "dashboard", "agents"), { list: a });
+      console.log("Agents saved successfully");
+    } catch(e) {
+      console.error("Save agents error:", e);
+      alert("Failed to save. Please check your connection and try again.");
+    }
+    setSaving(false);
+  };
+  const saveCompany = async (c) => {
+    setCompany(c);
+    try { await setDoc(doc(db, "dashboard", "company"), c); } catch(e) { console.error("Save company error:", e); alert("Failed to save company data."); }
+  };
+  const saveLogo = async (u) => {
+    setLogo(u);
+    setSaving(true);
+    try { await setDoc(doc(db, "dashboard", "logo"), { url: u }); console.log("Logo saved"); } catch(e) { console.error("Save logo error:", e); alert("Failed to save logo. Image may be too large."); }
+    setSaving(false);
+  };
 
   const handleLogoUpload = (e) => { const f = e.target.files[0]; if (f) { if (f.size > 500000) { alert("Logo too large. Use under 500KB."); return; } const r = new FileReader(); r.onloadend = () => saveLogo(r.result); r.readAsDataURL(f); } };
 
