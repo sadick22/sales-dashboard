@@ -127,6 +127,7 @@ const DEFAULT_AGENTS = [
   { id: "a12", name: "Gerrit", image: "", target: 40000 },
 ].map(a => ({
   ...a,
+  hideFromTV: false,
   weeklyLeads: makeEmptyWeeks(),
   weeklyCollections: makeEmptyWeeks(),
   weeklySales: makeEmptySales(),
@@ -413,11 +414,12 @@ function TVWeekly({ agents }) {
 
 // ─── TV MODE ───────────────────────────────────────────────────────
 function TVMode({ agents, company, logo, onClose }) {
-  const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
+  const tvAgents = agents.filter(a => !a.hideFromTV);
+  const sorted = [...tvAgents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
   const slides = [
-    { comp: <TVCompany company={company} agents={agents} />, dur: 20000 },
-    { comp: <TVAll agents={agents} />, dur: 15000 },
-    { comp: <TVWeekly agents={agents} />, dur: 15000 },
+    { comp: <TVCompany company={company} agents={tvAgents} />, dur: 20000 },
+    { comp: <TVAll agents={tvAgents} />, dur: 15000 },
+    { comp: <TVWeekly agents={tvAgents} />, dur: 15000 },
     ...sorted.filter(a => getMonthlyCollection(a) > 0).map((a, i) => ({ comp: <TVAgent agent={a} idx={i} company={company} />, dur: 10000 })),
   ];
   const [cur, setCur] = useState(0);
@@ -674,7 +676,7 @@ function PipelineViewModal({ agents, onClose }) {
 
 // ─── MODAL: AGENT ──────────────────────────────────────────────────
 function AgentModal({ agent, onSave, onClose }) {
-  const [form, setForm] = useState(agent ? { ...agent } : { name: "", image: "", target: 40000 });
+  const [form, setForm] = useState(agent ? { ...agent } : { name: "", image: "", target: 40000, hideFromTV: false });
   const [preview, setPreview] = useState(agent?.image || "");
   const fRef = useRef(null);
   const handleImg = (e) => { const f = e.target.files[0]; if (f) { if (f.size > 500000) { alert("Image too large. Please use an image under 500KB."); return; } const r = new FileReader(); r.onloadend = () => { setForm({ ...form, image: r.result }); setPreview(r.result); }; r.readAsDataURL(f); } };
@@ -690,6 +692,18 @@ function AgentModal({ agent, onSave, onClose }) {
           <button style={{ ...ST.btn(C.purple), width: "100%", textAlign: "center" }} onClick={() => fRef.current?.click()}>📷 {preview ? "Change Photo" : "Upload Photo"}</button>
         </div>
         <div><label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Monthly Target (QAR)</label><input type="number" style={ST.input} value={form.target} onChange={e => setForm({ ...form, target: Number(e.target.value)||40000 })} /></div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderRadius: 10, background: C.cardAlt, border: `1px solid ${form.hideFromTV ? C.warning : C.border}` }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>📺 Hide from TV Mode</div>
+            <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>Agent data stays on dashboard but won't appear on TV slides</div>
+          </div>
+          <div
+            onClick={() => setForm({ ...form, hideFromTV: !form.hideFromTV })}
+            style={{ width: 44, height: 24, borderRadius: 12, background: form.hideFromTV ? C.warning : "#334155", cursor: "pointer", position: "relative", transition: "background 0.2s ease", flexShrink: 0 }}
+          >
+            <div style={{ width: 18, height: 18, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: form.hideFromTV ? 23 : 3, transition: "left 0.2s ease", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
+          </div>
+        </div>
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}><button style={ST.btnO} onClick={onClose}>Cancel</button><button style={ST.btn()} onClick={() => onSave(form)}>Save</button></div>
     </div></div>
@@ -725,6 +739,7 @@ export default function SalesDashboard() {
         if (snap.exists()) {
           const list = snap.data().list.map(a => ({
             ...a,
+            hideFromTV: a.hideFromTV || false,
             weeklyLeads: a.weeklyLeads || makeEmptyWeeks(),
             weeklyCollections: a.weeklyCollections || makeEmptyWeeks(),
             weeklySales: a.weeklySales || makeEmptySales(),
@@ -788,8 +803,8 @@ export default function SalesDashboard() {
 
   const handleAgentSave = (form) => {
     let n;
-    if (form.id) { n = agents.map(a => a.id === form.id ? { ...a, name: form.name, image: form.image, target: form.target } : a); }
-    else { n = [...agents, { ...form, id: `a${Date.now()}`, target: form.target||40000, weeklyLeads: makeEmptyWeeks(), weeklyCollections: makeEmptyWeeks(), weeklySales: makeEmptySales() }]; }
+    if (form.id) { n = agents.map(a => a.id === form.id ? { ...a, name: form.name, image: form.image, target: form.target, hideFromTV: form.hideFromTV || false } : a); }
+    else { n = [...agents, { ...form, id: `a${Date.now()}`, target: form.target||40000, hideFromTV: form.hideFromTV || false, weeklyLeads: makeEmptyWeeks(), weeklyCollections: makeEmptyWeeks(), weeklySales: makeEmptySales() }]; }
     saveAgents(n); setModal(null);
   };
 
@@ -872,7 +887,7 @@ export default function SalesDashboard() {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{agents.map((a, i) => (
             <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 8, background: C.cardAlt }}>
               {a.image ? <img src={a.image} alt={a.name} style={ST.avImg} /> : <div style={ST.av(tri(i))}>{initials(a.name)}</div>}
-              <span style={{ flex: 1, fontWeight: 600, color: C.text }}>{a.name}</span>
+              <span style={{ flex: 1, fontWeight: 600, color: C.text }}>{a.name} {a.hideFromTV && <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: `${C.warning}20`, color: C.warning, fontWeight: 600, marginLeft: 4 }}>Hidden from TV</span>}</span>
               <span style={{ fontSize: 13, color: C.textDim }}>{fmt(a.target)} QAR</span>
               <button style={{ ...ST.btnO, padding: "4px 12px" }} onClick={() => setModal({ type: "agent", agent: a })}>Edit</button>
               <button style={{ ...ST.btn(C.danger), padding: "4px 12px" }} onClick={() => handleDeleteAgent(a.id)}>✕</button>
