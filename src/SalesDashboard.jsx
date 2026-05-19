@@ -415,10 +415,10 @@ function TVWeekly({ agents }) {
 function TVMode({ agents, company, logo, onClose }) {
   const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
   const slides = [
-    { comp: <TVCompany company={company} agents={agents} />, dur: 15000 },
+    { comp: <TVCompany company={company} agents={agents} />, dur: 20000 },
     { comp: <TVAll agents={agents} />, dur: 15000 },
     { comp: <TVWeekly agents={agents} />, dur: 15000 },
-    ...sorted.filter(a => getMonthlyCollection(a) > 0).map((a, i) => ({ comp: <TVAgent agent={a} idx={i} company={company} />, dur: 5000 })),
+    ...sorted.filter(a => getMonthlyCollection(a) > 0).map((a, i) => ({ comp: <TVAgent agent={a} idx={i} company={company} />, dur: 10000 })),
   ];
   const [cur, setCur] = useState(0);
   const [prog, setProg] = useState(0);
