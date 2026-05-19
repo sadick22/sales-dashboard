@@ -24,9 +24,23 @@ function getQuarterThursdays(year, quarter) {
   const end = new Date(year, startMonth + 3, 0);
   const thursdays = [];
   const d = new Date(start);
-  // Find first Thursday
   while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
   while (d <= end) {
+    thursdays.push(new Date(d));
+    d.setDate(d.getDate() + 7);
+  }
+  return thursdays;
+}
+
+// Custom start date: May 7, 2026 through end of Q2 (June 25)
+function getCustomThursdays() {
+  const startDate = new Date(2026, 4, 7); // May 7, 2026 (month is 0-indexed)
+  const endDate = new Date(2026, 5, 30); // End of June 2026
+  const thursdays = [];
+  const d = new Date(startDate);
+  // Ensure we start on a Thursday
+  while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
+  while (d <= endDate) {
     thursdays.push(new Date(d));
     d.setDate(d.getDate() + 7);
   }
@@ -57,15 +71,41 @@ function getCurrentWeekIndex(thursdays) {
 }
 
 function getMonthFromThursday(d) {
-  return d.getMonth(); // 0-indexed: 3=Apr, 4=May, 5=Jun for Q2
+  return d.getMonth();
+}
+
+// Get which week number within a month this Thursday is (1-based)
+function getWeekOfMonth(thursday, allThursdays) {
+  const m = thursday.getMonth();
+  let count = 0;
+  for (const t of allThursdays) {
+    if (t.getMonth() === m) {
+      count++;
+      if (t.getTime() === thursday.getTime()) return count;
+    }
+  }
+  return 1;
+}
+
+// Get the previous Thursday's label for the "Previous" column header
+function getPrevWeekLabel(wi, thursdays) {
+  if (wi <= 0) return "Opening";
+  return `W/E ${formatThursday(thursdays[wi - 1])}`;
+}
+
+// Get the week sales label like "Week 1 Sales", "Week 2 Sales" etc.
+function getWeekSalesLabel(wi, thursdays) {
+  const t = thursdays[wi];
+  const weekNum = getWeekOfMonth(t, thursdays);
+  return `Week ${weekNum} Sales`;
 }
 
 const YEAR = new Date().getFullYear();
 const QUARTER = getCurrentQuarter();
-const THURSDAYS = getQuarterThursdays(YEAR, QUARTER);
+const THURSDAYS = getCustomThursdays(); // May 7 through Jun 25, 2026
 const THURSDAY_LABELS = THURSDAYS.map(formatThursday);
 const NUM_WEEKS = THURSDAYS.length;
-const QUARTER_MONTHS = [(QUARTER-1)*3, (QUARTER-1)*3+1, (QUARTER-1)*3+2]; // e.g. Q2 = [3,4,5]
+const QUARTER_MONTHS = [4, 5]; // May and June (0-indexed) since we start from May
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 // ─── DEFAULT DATA ──────────────────────────────────────────────────
@@ -434,11 +474,22 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
   })));
   const [wi, setWi] = useState(getCurrentWeekIndex(THURSDAYS));
 
-  // Get auto-calculated Previous for an agent at a given week
-  // Previous = last week's Current entry
+  // Previous = last week's Current entry (auto-filled, read-only)
   const getAutoPrev = (agentData, weekIdx) => {
     if (weekIdx <= 0) return 0;
     return agentData.weeklySales[weekIdx - 1]?.current || 0;
+  };
+
+  // Get monthly collection total for an agent (sum of all weeks in the same month as selected week)
+  const getMonthlyTotal = (agentData) => {
+    const selectedMonth = THURSDAYS[wi].getMonth();
+    let total = 0;
+    THURSDAYS.forEach((t, i) => {
+      if (t.getMonth() === selectedMonth) {
+        total += agentData.weeklyCollections[i] || 0;
+      }
+    });
+    return total;
   };
 
   const handleSalesCurrentChange = (id, val) => {
@@ -455,7 +506,6 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
     }));
   };
 
-  // When saving, ensure all Previous values are correctly set from prior week's Current
   const handleSave = () => {
     const fixed = data.map(d => {
       const sales = d.weeklySales.map((s, j) => {
@@ -475,10 +525,15 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
     return s + Math.max(current - prevVal, 0);
   }, 0);
 
+  // Dynamic column headers
+  const prevHeader = getPrevWeekLabel(wi, THURSDAYS);
+  const weekSalesHeader = getWeekSalesLabel(wi, THURSDAYS);
+  const selectedMonthName = MONTH_NAMES[THURSDAYS[wi].getMonth()];
+
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mcWide} onClick={e => e.stopPropagation()}>
       <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>💰 Update Weekly Collection & Sales</h3>
-      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Finance Department</p>
+      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Finance Department &nbsp;|&nbsp; Week ending: <span style={{ color: C.accent, fontWeight: 600 }}>{formatThursdayFull(THURSDAYS[wi])}</span></p>
       <div style={{ marginBottom: 16 }}>
         <label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Week Ending (Thursday)</label>
         <select style={ST.sel} value={wi} onChange={e => setWi(Number(e.target.value))}>
@@ -490,17 +545,23 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
         {/* LEFT: Collections */}
         <div>
           <div style={{ fontSize: 14, fontWeight: 700, color: C.accent, marginBottom: 12, textTransform: "uppercase", letterSpacing: "1px" }}>📦 Collections</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr", gap: 4, marginBottom: 8 }}>
+            <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600 }}>Agent</div>
+            <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: "center" }}>This Week</div>
+            <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: "center" }}>{selectedMonthName} Total</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {data.map(d => (
-              <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 90, fontWeight: 600, fontSize: 13, color: C.text, flexShrink: 0 }}>{d.name}</span>
+              <div key={d.id} style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr", gap: 4, alignItems: "center" }}>
+                <span style={{ fontWeight: 600, fontSize: 12, color: C.text, flexShrink: 0 }}>{d.name}</span>
                 <input type="number" style={ST.inputSm} value={d.weeklyCollections[wi] || ""} placeholder="0"
                   onChange={e => setData(prev => prev.map(x => x.id === d.id ? { ...x, weeklyCollections: x.weeklyCollections.map((v, j) => j === wi ? (Number(e.target.value) || 0) : v) } : x))} />
+                <input type="text" style={ST.inputDisabled} value={fmt(getMonthlyTotal(d))} readOnly />
               </div>
             ))}
           </div>
           <div style={{ marginTop: 12, padding: "10px 14px", background: C.cardAlt, borderRadius: 8, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>Total Collection</span>
+            <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>Total This Week</span>
             <span style={{ fontWeight: 800, fontSize: 16, color: C.accent }}>{fmt(totalCol)} QAR</span>
           </div>
         </div>
@@ -510,9 +571,9 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
           <div style={{ fontSize: 14, fontWeight: 700, color: C.success, marginBottom: 12, textTransform: "uppercase", letterSpacing: "1px" }}>📈 Sales</div>
           <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr 1fr", gap: 4, marginBottom: 8 }}>
             <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600 }}>Agent</div>
-            <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: "center" }}>Previous</div>
-            <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: "center" }}>Current</div>
-            <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: "center" }}>Total</div>
+            <div style={{ fontSize: 10, color: C.accent, fontWeight: 600, textAlign: "center" }}>{prevHeader}</div>
+            <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: "center" }}>Current Sales</div>
+            <div style={{ fontSize: 10, color: C.success, fontWeight: 600, textAlign: "center" }}>{weekSalesHeader}</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {data.map(d => {
@@ -522,7 +583,7 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
               return (
                 <div key={d.id} style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr 1fr", gap: 4, alignItems: "center" }}>
                   <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{d.name}</span>
-                  <input type="text" style={ST.inputDisabled} value={fmt(autoPrev)} readOnly title="Auto-filled from last week's Current" />
+                  <input type="text" style={ST.inputDisabled} value={fmt(autoPrev)} readOnly title={`Auto-filled from ${prevHeader}`} />
                   <input type="number" style={ST.inputSm} value={currentVal || ""} placeholder="0" onChange={e => handleSalesCurrentChange(d.id, e.target.value)} />
                   <input type="text" style={ST.inputDisabled} value={fmt(totalVal)} readOnly />
                 </div>
@@ -530,7 +591,7 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
             })}
           </div>
           <div style={{ marginTop: 12, padding: "10px 14px", background: C.cardAlt, borderRadius: 8, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>Total Sales</span>
+            <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{weekSalesHeader} Total</span>
             <span style={{ fontWeight: 800, fontSize: 16, color: C.success }}>{fmt(totalSales)} QAR</span>
           </div>
         </div>
