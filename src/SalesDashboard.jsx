@@ -772,7 +772,7 @@ function PipelineViewModal({ agents, aprilBackfill = {}, onClose }) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, textAlign: "center" }}>
             <div><div style={{ fontSize: 24, fontWeight: 800, color: C.accent }}>{fmt(pipeline[m.key].leads)}</div><div style={{ fontSize: 11, color: C.textDim }}>Total Leads</div></div>
             <div><div style={{ fontSize: 24, fontWeight: 800, color: C.success }}>{fmt(pipeline[m.key].sales)}</div><div style={{ fontSize: 11, color: C.textDim }}>Total Sales</div></div>
-            <div><div style={{ fontSize: 24, fontWeight: 800, color: pipeline[m.key].ratio >= 50 ? C.success : C.warning }}>{pipeline[m.key].ratio}%</div><div style={{ fontSize: 11, color: C.textDim }}>Sales Conversion Rate</div></div>
+            <div><div style={{ fontSize: 24, fontWeight: 800, color: pipeline[m.key].ratio >= 50 ? C.success : C.warning }}>{pipeline[m.key].ratio}%</div><div style={{ fontSize: 11, color: C.textDim }}>Conversion Ratio</div></div>
           </div>
         </div>
       ))}
