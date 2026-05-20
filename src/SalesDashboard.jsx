@@ -451,12 +451,80 @@ function TVWeekly({ agents }) {
   );
 }
 
+// ─── TV PODIUM (Top 3 Leaderboard) ─────────────────────────────────
+function TVPodium({ agents }) {
+  const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
+  const top3 = sorted.slice(0, 3);
+  const podiumOrder = top3.length === 3 ? [top3[1], top3[0], top3[2]] : top3; // Silver, Gold, Bronze for visual layout
+  const medals = { 0: { emoji: "🥈", label: "2nd Place", color: "#94a3b8", height: 140 }, 1: { emoji: "🥇", label: "1st Place", color: C.gold, height: 180 }, 2: { emoji: "🥉", label: "3rd Place", color: "#cd7f32", height: 110 } };
+  const podiumColors = top3.length === 3 ? [medals[0], medals[1], medals[2]] : top3.map((_, i) => medals[i]);
+
+  return (
+    <div style={{ width: "100%", maxWidth: 1200, textAlign: "center" }}>
+      <h2 style={{ fontSize: 32, fontWeight: 800, marginBottom: 8, color: C.gold }}>🏆 Top Performers</h2>
+      <p style={{ fontSize: 14, color: C.textDim, marginBottom: 40 }}>Monthly Collection Leaderboard</p>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 24 }}>
+        {podiumOrder.map((agent, vi) => {
+          const pc = podiumColors[vi];
+          const col = getMonthlyCollection(agent);
+          const p = pct(col, agent.target);
+          const isFirst = vi === 1;
+          return (
+            <div key={agent.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", width: isFirst ? 280 : 220 }}>
+              {/* Agent info */}
+              <div style={{ fontSize: isFirst ? 48 : 36, marginBottom: 8, filter: isFirst ? "drop-shadow(0 0 12px rgba(251,191,36,0.5))" : "none" }}>{pc.emoji}</div>
+              <div style={{ position: "relative", marginBottom: 12 }}>
+                {agent.image ? (
+                  <img src={agent.image} alt={agent.name} style={{ width: isFirst ? 100 : 76, height: isFirst ? 100 : 76, borderRadius: "50%", border: `4px solid ${pc.color}`, objectFit: "cover", boxShadow: isFirst ? `0 0 24px ${pc.color}60` : "none" }} />
+                ) : (
+                  <div style={{ ...ST.av(pc.color), width: isFirst ? 100 : 76, height: isFirst ? 100 : 76, fontSize: isFirst ? 32 : 24, border: `4px solid ${pc.color}`, boxShadow: isFirst ? `0 0 24px ${pc.color}60` : "none" }}>{initials(agent.name)}</div>
+                )}
+              </div>
+              <div style={{ fontSize: isFirst ? 22 : 17, fontWeight: 800, color: "#f1f5f9", marginBottom: 4 }}>{agent.name}</div>
+              <div style={{ fontSize: isFirst ? 24 : 18, fontWeight: 800, color: pc.color, marginBottom: 4 }}>{fmt(col)} QAR</div>
+              <div style={{ fontSize: 12, color: C.textDim, marginBottom: 12 }}>{p}% of target</div>
+              {/* Podium block */}
+              <div style={{
+                width: "100%", height: pc.height, borderRadius: "12px 12px 0 0",
+                background: `linear-gradient(180deg, ${pc.color}30 0%, ${pc.color}10 100%)`,
+                border: `2px solid ${pc.color}40`, borderBottom: "none",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: isFirst ? 64 : 48, fontWeight: 900, color: `${pc.color}25`,
+              }}>
+                {vi === 1 ? "1" : vi === 0 ? "2" : "3"}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {/* Honorable mentions: 4th and 5th */}
+      {sorted.length > 3 && (
+        <div style={{ marginTop: 32, display: "flex", justifyContent: "center", gap: 32 }}>
+          {sorted.slice(3, 5).map((a, i) => {
+            const col = getMonthlyCollection(a);
+            if (col <= 0) return null;
+            return (
+              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: `1px solid ${C.border}` }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: C.textDim }}>{i + 4}.</span>
+                {a.image ? <img src={a.image} alt={a.name} style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover" }} /> : <div style={{ ...ST.av(tri(i)), width: 36, height: 36, fontSize: 13 }}>{initials(a.name)}</div>}
+                <span style={{ fontWeight: 600, fontSize: 14, color: C.text }}>{a.name}</span>
+                <span style={{ fontWeight: 700, fontSize: 14, color: C.accent }}>{fmt(col)} QAR</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── TV MODE ───────────────────────────────────────────────────────
 function TVMode({ agents, company, logo, onClose, aprilBackfill = {} }) {
   const tvAgents = agents.filter(a => !a.hideFromTV);
   const sorted = [...tvAgents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
   const slides = [
     { comp: <TVCompany company={company} agents={tvAgents} aprilBackfill={aprilBackfill} />, dur: 20000 },
+    { comp: <TVPodium agents={tvAgents} />, dur: 15000 },
     { comp: <TVAll agents={tvAgents} />, dur: 15000 },
     { comp: <TVWeekly agents={tvAgents} />, dur: 15000 },
     ...sorted.filter(a => getMonthlyCollection(a) > 0).map((a, i) => ({ comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} />, dur: 10000 })),
@@ -522,7 +590,7 @@ function WeeklyLeadsModal({ agents, onSave, onClose }) {
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mc} onClick={e => e.stopPropagation()}>
       <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>📋 Update Weekly Leads</h3>
-      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Fadwa (Property Administrator)</p>
+      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Fadwa & Lucy (Property Administrators)</p>
       <div style={{ marginBottom: 16 }}>
         <label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Week Ending (Thursday)</label>
         <select style={ST.sel} value={wi} onChange={e => setWi(Number(e.target.value))}>
@@ -1021,9 +1089,60 @@ export default function SalesDashboard() {
 
   if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} />;
 
-  const Dash = () => (
+  const Dash = () => {
+    // This Week calculations
+    const currentWi = getCurrentWeekIndex(THURSDAYS);
+    const prevWi = currentWi > 0 ? currentWi - 1 : null;
+    const thisWeekCol = agents.reduce((s, a) => s + ((a.weeklyCollections || [])[currentWi] || 0), 0);
+    const prevWeekCol = prevWi !== null ? agents.reduce((s, a) => s + ((a.weeklyCollections || [])[prevWi] || 0), 0) : 0;
+    const thisWeekLeads = agents.reduce((s, a) => s + ((a.weeklyLeads || [])[currentWi] || 0), 0);
+    const prevWeekLeads = prevWi !== null ? agents.reduce((s, a) => s + ((a.weeklyLeads || [])[prevWi] || 0), 0) : 0;
+    const thisWeekSales = agents.reduce((s, a) => s + (((a.weeklySales || [])[currentWi] || {}).total || 0), 0);
+    const prevWeekSales = prevWi !== null ? agents.reduce((s, a) => s + (((a.weeklySales || [])[prevWi] || {}).total || 0), 0) : 0;
+    const colTrend = trend(thisWeekCol, prevWeekCol);
+    const colChange = prevWeekCol > 0 ? Math.round(((thisWeekCol - prevWeekCol) / prevWeekCol) * 100) : (thisWeekCol > 0 ? 100 : 0);
+    const leadsTrend = trend(thisWeekLeads, prevWeekLeads);
+    const salesTrend = trend(thisWeekSales, prevWeekSales);
+
+    return (
     <div style={ST.page}>
       <div style={{ fontSize: 13, color: C.textDim, marginBottom: 12 }}>📅 Today: <span style={{ color: C.accent, fontWeight: 600 }}>{dateStr}</span> &nbsp;|&nbsp; Q{QUARTER} {YEAR} &nbsp;|&nbsp; {NUM_WEEKS} weeks in quarter</div>
+
+      {/* This Week Summary */}
+      <div style={{ ...ST.card, marginBottom: 20, background: `linear-gradient(135deg, ${C.card} 0%, #1a1a3e 100%)`, border: `1px solid ${C.accent}30` }}>
+        <div style={ST.glow} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div style={ST.title}>⚡ This Week — W/E {formatThursday(THURSDAYS[currentWi])}</div>
+          {prevWi !== null && <div style={{ fontSize: 11, color: C.textDim }}>vs previous week (W/E {formatThursday(THURSDAYS[prevWi])})</div>}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: `${C.gold}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>💰</div>
+            <div>
+              <div style={{ fontSize: 11, color: C.textDim, marginBottom: 2 }}>Collections</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: C.gold }}>{fmt(thisWeekCol)} <span style={{ fontSize: 12, fontWeight: 400 }}>QAR</span></div>
+              {prevWi !== null && <div style={{ fontSize: 11, color: colTrend.color, fontWeight: 600 }}>{colTrend.icon} {colChange > 0 ? "+" : ""}{colChange}% vs last week</div>}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: `${C.purple}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>📋</div>
+            <div>
+              <div style={{ fontSize: 11, color: C.textDim, marginBottom: 2 }}>Leads</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: C.purple }}>{thisWeekLeads}</div>
+              {prevWi !== null && <div style={{ fontSize: 11, color: leadsTrend.color, fontWeight: 600 }}>{leadsTrend.icon} {prevWeekLeads > 0 ? `${Math.round(((thisWeekLeads - prevWeekLeads) / prevWeekLeads) * 100)}%` : (thisWeekLeads > 0 ? "+100%" : "—")} vs last week</div>}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: `${C.success}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>📈</div>
+            <div>
+              <div style={{ fontSize: 11, color: C.textDim, marginBottom: 2 }}>Sales</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: C.success }}>{thisWeekSales}</div>
+              {prevWi !== null && <div style={{ fontSize: 11, color: salesTrend.color, fontWeight: 600 }}>{salesTrend.icon} {prevWeekSales > 0 ? `${Math.round(((thisWeekSales - prevWeekSales) / prevWeekSales) * 100)}%` : (thisWeekSales > 0 ? "+100%" : "—")} vs last week</div>}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div style={{ ...ST.grid(4), marginBottom: 20 }}>
         <SCard title="Q1 Result" value={fmt(company.q1Done)} sub={`Target: ${fmt(company.q1Target)} (${pct(company.q1Done, company.q1Target)}%)`} icon="📅" color={C.purple} />
         <SCard title="Q2 Target" value={fmt(company.q2Target)} sub="QAR" icon="📅" color={C.accent} />
@@ -1069,7 +1188,8 @@ export default function SalesDashboard() {
         </div>
       </div>
     </div>
-  );
+    );
+  };
 
   const Settings = () => (
     <div style={ST.page}>
@@ -1098,7 +1218,7 @@ export default function SalesDashboard() {
             <div style={ST.title}>📝 Data Input</div>
             <p style={{ fontSize: 13, color: C.textDim, margin: "0 0 16px" }}>Update weekly data for leads, collections, and sales.</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <button style={{ ...ST.btn(C.accent), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "leads" })}>📋 Weekly Update Leads (Fadwa)</button>
+              <button style={{ ...ST.btn(C.accent), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "leads" })}>📋 Weekly Update Leads (Fadwa & Lucy)</button>
               <button style={{ ...ST.btn(C.purple), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "collsales" })}>💰 Weekly Update Collection & Sales (Finance)</button>
               <button style={{ ...ST.btn(C.warning), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "aprilBackfill" })}>📅 April Backfill Data</button>
               <button style={{ ...ST.btn(C.success), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "pipeline" })}>📊 View Company Lead Pipeline</button>
