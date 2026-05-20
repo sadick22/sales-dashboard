@@ -524,10 +524,10 @@ function TVMode({ agents, company, logo, onClose, aprilBackfill = {} }) {
   const sorted = [...tvAgents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
   const slides = [
     { comp: <TVCompany company={company} agents={tvAgents} aprilBackfill={aprilBackfill} />, dur: 20000 },
-    { comp: <TVPodium agents={tvAgents} />, dur: 15000 },
     { comp: <TVAll agents={tvAgents} />, dur: 15000 },
     { comp: <TVWeekly agents={tvAgents} />, dur: 15000 },
     ...sorted.filter(a => getMonthlyCollection(a) > 0).map((a, i) => ({ comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} />, dur: 10000 })),
+    { comp: <TVPodium agents={tvAgents} />, dur: 15000 },
   ];
   const [cur, setCur] = useState(0);
   const [prog, setProg] = useState(0);
@@ -772,7 +772,7 @@ function PipelineViewModal({ agents, aprilBackfill = {}, onClose }) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, textAlign: "center" }}>
             <div><div style={{ fontSize: 24, fontWeight: 800, color: C.accent }}>{fmt(pipeline[m.key].leads)}</div><div style={{ fontSize: 11, color: C.textDim }}>Total Leads</div></div>
             <div><div style={{ fontSize: 24, fontWeight: 800, color: C.success }}>{fmt(pipeline[m.key].sales)}</div><div style={{ fontSize: 11, color: C.textDim }}>Total Sales</div></div>
-            <div><div style={{ fontSize: 24, fontWeight: 800, color: pipeline[m.key].ratio >= 50 ? C.success : C.warning }}>{pipeline[m.key].ratio}%</div><div style={{ fontSize: 11, color: C.textDim }}>Conversion Ratio</div></div>
+            <div><div style={{ fontSize: 24, fontWeight: 800, color: pipeline[m.key].ratio >= 50 ? C.success : C.warning }}>{pipeline[m.key].ratio}%</div><div style={{ fontSize: 11, color: C.textDim }}>Sales Conversion Rate</div></div>
           </div>
         </div>
       ))}
@@ -861,7 +861,7 @@ function AprilBackfillModal({ agents, aprilBackfill, onSave, onClose }) {
           {showRatio ? (
             <><div style={{ fontSize: 16, fontWeight: 800, color: C.gold }}>{formatRatio(totalCol, totalSales)}</div><div style={{ fontSize: 10, color: C.textDim }}>Collection : Sales <span style={{ color: C.accent, fontSize: 9 }}>▸ tap for %</span></div></>
           ) : (
-            <><div style={{ fontSize: 18, fontWeight: 800, color: conversionPct >= 50 ? C.success : C.warning }}>{conversionPct}%</div><div style={{ fontSize: 10, color: C.textDim }}>Conversion Ratio <span style={{ color: C.accent, fontSize: 9 }}>▸ tap for ratio</span></div></>
+            <><div style={{ fontSize: 18, fontWeight: 800, color: conversionPct >= 50 ? C.success : C.warning }}>{conversionPct}%</div><div style={{ fontSize: 10, color: C.textDim }}>Sales Conversion Rate <span style={{ color: C.accent, fontSize: 9 }}>▸ tap for ratio</span></div></>
           )}
         </div>
       </div>
