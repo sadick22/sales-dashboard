@@ -780,18 +780,47 @@ function AprilBackfillModal({ agents, aprilBackfill, onSave, onClose }) {
 function AgentModal({ agent, onSave, onClose }) {
   const [form, setForm] = useState(agent ? { ...agent } : { name: "", image: "", target: 40000, hideFromTV: false });
   const [preview, setPreview] = useState(agent?.image || "");
+  const [uploading, setUploading] = useState(false);
   const fRef = useRef(null);
-  const handleImg = (e) => { const f = e.target.files[0]; if (f) { if (f.size > 500000) { alert("Image too large. Please use an image under 500KB."); return; } const r = new FileReader(); r.onloadend = () => { setForm({ ...form, image: r.result }); setPreview(r.result); }; r.readAsDataURL(f); } };
+  const handleImg = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    setUploading(true);
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const size = 150;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        // Crop to square from center
+        const min = Math.min(img.width, img.height);
+        const sx = (img.width - min) / 2;
+        const sy = (img.height - min) / 2;
+        ctx.drawImage(img, sx, sy, min, min, 0, 0, size, size);
+        const compressed = canvas.toDataURL("image/jpeg", 0.7);
+        setForm(prev => ({ ...prev, image: compressed }));
+        setPreview(compressed);
+        setUploading(false);
+      };
+      img.onerror = () => { alert("Could not read image."); setUploading(false); };
+      img.src = ev.target.result;
+    };
+    reader.onerror = () => { alert("Could not read file."); setUploading(false); };
+    reader.readAsDataURL(f);
+  };
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mc} onClick={e => e.stopPropagation()}>
       <h3 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 700, color: C.text }}>{agent ? "Edit Agent" : "Add Agent"}</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div><label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Name</label><input style={ST.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Agent name" /></div>
         <div>
-          <label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Profile Photo (max 500KB)</label>
+          <label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Profile Photo</label>
           {preview ? <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}><img src={preview} alt="" style={{ width: 60, height: 60, borderRadius: "50%", objectFit: "cover", border: `2px solid ${C.accent}` }} /><button style={{ ...ST.btn(C.danger), padding: "6px 14px", fontSize: 12 }} onClick={() => { setForm({ ...form, image: "" }); setPreview(""); }}>Remove</button></div> : <div style={{ width: 60, height: 60, borderRadius: "50%", background: C.cardAlt, border: `2px dashed ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: C.textDim, marginBottom: 8 }}>👤</div>}
           <input ref={fRef} type="file" accept="image/*" onChange={handleImg} style={{ display: "none" }} />
-          <button style={{ ...ST.btn(C.purple), width: "100%", textAlign: "center" }} onClick={() => fRef.current?.click()}>📷 {preview ? "Change Photo" : "Upload Photo"}</button>
+          <button style={{ ...ST.btn(C.purple), width: "100%", textAlign: "center", opacity: uploading ? 0.6 : 1 }} onClick={() => fRef.current?.click()} disabled={uploading}>{uploading ? "⏳ Compressing..." : `📷 ${preview ? "Change Photo" : "Upload Photo"}`}</button>
         </div>
         <div><label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Monthly Target (QAR)</label><input type="number" style={ST.input} value={form.target} onChange={e => setForm({ ...form, target: Number(e.target.value)||40000 })} /></div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderRadius: 10, background: C.cardAlt, border: `1px solid ${form.hideFromTV ? C.warning : C.border}` }}>
@@ -902,7 +931,29 @@ export default function SalesDashboard() {
     setSaving(false);
   };
 
-  const handleLogoUpload = (e) => { const f = e.target.files[0]; if (f) { if (f.size > 500000) { alert("Logo too large. Use under 500KB."); return; } const r = new FileReader(); r.onloadend = () => saveLogo(r.result); r.readAsDataURL(f); } };
+  const handleLogoUpload = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const maxW = 300, maxH = 100;
+        let w = img.width, h = img.height;
+        if (w > maxW) { h = h * (maxW / w); w = maxW; }
+        if (h > maxH) { w = w * (maxH / h); h = maxH; }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        const compressed = canvas.toDataURL("image/png", 0.8);
+        saveLogo(compressed);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(f);
+  };
 
   const handleWeeklyLeadsSave = (data) => {
     const n = agents.map(a => { const d = data.find(x => x.id === a.id); return d ? { ...a, weeklyLeads: d.weeklyLeads } : a; });
