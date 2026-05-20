@@ -166,23 +166,25 @@ const calcPipeline = (agents, aprilBackfill = {}) => {
   Q2_ALL_MONTHS.forEach(m => labels[m] = MONTH_NAMES[m].toLowerCase());
   const result = {};
   Q2_ALL_MONTHS.forEach(m => {
-    let leads = 0, sales = 0;
+    let leads = 0, sales = 0, collections = 0;
     if (m === 3) {
       // April: use backfill data
       agents.forEach(a => {
         const bf = aprilBackfill[a.id] || {};
         leads += bf.leads || 0;
         sales += bf.sales || 0;
+        collections += bf.collections || 0;
       });
     } else {
       // May/June: use weekly data
       agents.forEach(a => {
         leads += getMonthBreakdown(a, "leads")[m] || 0;
         sales += getMonthBreakdown(a, "sales")[m] || 0;
+        collections += getMonthBreakdown(a, "collections")[m] || 0;
       });
     }
-    const ratio = leads > 0 ? Math.round((sales / leads) * 100) : 0;
-    result[labels[m]] = { leads, sales, ratio };
+    const ratio = sales > 0 ? Math.round((collections / sales) * 100) : 0;
+    result[labels[m]] = { leads, sales, collections, ratio };
   });
   return result;
 };
@@ -342,7 +344,8 @@ function TVAgent({ agent, idx, company, aprilBackfill = {} }) {
   const aprilSales = (aprilBackfill[agent.id] || {}).sales || 0;
   const totalLeads = leads + aprilLeads;
   const totalSales = sales + aprilSales;
-  const ratio = totalLeads > 0 ? Math.round((totalSales / totalLeads) * 100) : 0;
+  const totalCollections = col + aprilCol;
+  const ratio = totalSales > 0 ? Math.round((totalCollections / totalSales) * 100) : 0;
   const monthData = [
     { name: "Apr", collection: aprilCol },
     ...QUARTER_MONTHS.map(m => ({ name: MONTH_NAMES[m], collection: mb[m]||0 }))
@@ -384,7 +387,7 @@ function TVAgent({ agent, idx, company, aprilBackfill = {} }) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, textAlign: "center" }}>
             <div><div style={{ fontSize: 18, fontWeight: 800, color: C.accent }}>{totalLeads}</div><div style={{ fontSize: 10, color: C.textDim }}>Leads</div></div>
             <div><div style={{ fontSize: 18, fontWeight: 800, color: C.success }}>{totalSales}</div><div style={{ fontSize: 10, color: C.textDim }}>Sales</div></div>
-            <div><div style={{ fontSize: 18, fontWeight: 800, color: ratio >= 5 ? C.success : C.warning }}>{ratio}%</div><div style={{ fontSize: 10, color: C.textDim }}>Close Rate</div></div>
+            <div><div style={{ fontSize: 18, fontWeight: 800, color: ratio >= 50 ? C.success : C.warning }}>{ratio}%</div><div style={{ fontSize: 10, color: C.textDim }}>Conversion Rate</div></div>
           </div>
         </div>
       </div>
@@ -423,7 +426,7 @@ function TVCompany({ company, agents, aprilBackfill = {} }) {
         </div>
         <div style={ST.card}><div style={ST.title}>Lead Pipeline (Auto-calculated)</div>
           <ResponsiveContainer width="100%" height={250}><BarChart data={pipeData}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="name" stroke={C.textDim} fontSize={12} /><YAxis stroke={C.textDim} fontSize={11} /><Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} /><Legend /><Bar dataKey="leads" fill={C.accent} name="Leads" radius={[4,4,0,0]} /><Bar dataKey="sales" fill={C.success} name="Sales" radius={[4,4,0,0]} /></BarChart></ResponsiveContainer>
-          <div style={{ display: "flex", justifyContent: "center", gap: 32, marginTop: 12 }}>{pipeData.map(d => (<div key={d.name} style={{ textAlign: "center" }}><div style={{ fontSize: 11, color: C.textDim }}>{d.name} Close Rate</div><div style={{ fontSize: 20, fontWeight: 800, color: d.ratio >= 5 ? C.success : C.warning }}>{d.ratio}%</div></div>))}</div>
+          <div style={{ display: "flex", justifyContent: "center", gap: 32, marginTop: 12 }}>{pipeData.map(d => (<div key={d.name} style={{ textAlign: "center" }}><div style={{ fontSize: 11, color: C.textDim }}>{d.name} Conversion Rate</div><div style={{ fontSize: 20, fontWeight: 800, color: d.ratio >= 50 ? C.success : C.warning }}>{d.ratio}%</div></div>))}</div>
         </div>
       </div>
     </div>
@@ -701,7 +704,7 @@ function PipelineViewModal({ agents, aprilBackfill = {}, onClose }) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, textAlign: "center" }}>
             <div><div style={{ fontSize: 24, fontWeight: 800, color: C.accent }}>{fmt(pipeline[m.key].leads)}</div><div style={{ fontSize: 11, color: C.textDim }}>Total Leads</div></div>
             <div><div style={{ fontSize: 24, fontWeight: 800, color: C.success }}>{fmt(pipeline[m.key].sales)}</div><div style={{ fontSize: 11, color: C.textDim }}>Total Sales</div></div>
-            <div><div style={{ fontSize: 24, fontWeight: 800, color: pipeline[m.key].ratio >= 5 ? C.success : C.warning }}>{pipeline[m.key].ratio}%</div><div style={{ fontSize: 11, color: C.textDim }}>Close Rate</div></div>
+            <div><div style={{ fontSize: 24, fontWeight: 800, color: pipeline[m.key].ratio >= 50 ? C.success : C.warning }}>{pipeline[m.key].ratio}%</div><div style={{ fontSize: 11, color: C.textDim }}>Sales Conversion Rate</div></div>
           </div>
         </div>
       ))}
@@ -725,6 +728,7 @@ function AprilBackfillModal({ agents, aprilBackfill, onSave, onClose }) {
     });
     return d;
   });
+  const [showRatio, setShowRatio] = useState(false);
 
   const updateField = (id, field, val) => {
     setData(prev => ({ ...prev, [id]: { ...prev[id], [field]: Number(val) || 0 } }));
@@ -733,7 +737,23 @@ function AprilBackfillModal({ agents, aprilBackfill, onSave, onClose }) {
   const totalCol = Object.values(data).reduce((s, d) => s + (d.collections || 0), 0);
   const totalLeads = Object.values(data).reduce((s, d) => s + (d.leads || 0), 0);
   const totalSales = Object.values(data).reduce((s, d) => s + (d.sales || 0), 0);
-  const closeRate = totalLeads > 0 ? Math.round((totalSales / totalLeads) * 100) : 0;
+  const conversionPct = totalSales > 0 ? Math.round((totalCol / totalSales) * 100) : 0;
+
+  // Format ratio as simplified X : Y
+  const formatRatio = (col, sales) => {
+    if (sales === 0) return "0 : 0";
+    const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+    const g = gcd(Math.round(col), Math.round(sales));
+    if (g === 0) return `${Math.round(col)} : ${Math.round(sales)}`;
+    const rc = Math.round(col / g);
+    const rs = Math.round(sales / g);
+    // If numbers are still large, simplify to per-1 basis
+    if (rc > 1000 || rs > 1000) {
+      const perSale = totalSales > 0 ? Math.round(totalCol / totalSales) : 0;
+      return `${fmt(perSale)} : 1`;
+    }
+    return `${fmt(rc)} : ${fmt(rs)}`;
+  };
 
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mcWide} onClick={e => e.stopPropagation()}>
@@ -766,7 +786,16 @@ function AprilBackfillModal({ agents, aprilBackfill, onSave, onClose }) {
         <div><div style={{ fontSize: 18, fontWeight: 800, color: C.accent }}>{fmt(totalCol)}</div><div style={{ fontSize: 10, color: C.textDim }}>Total Collections</div></div>
         <div><div style={{ fontSize: 18, fontWeight: 800, color: C.success }}>{totalSales}</div><div style={{ fontSize: 10, color: C.textDim }}>Total Sales</div></div>
         <div><div style={{ fontSize: 18, fontWeight: 800, color: C.purple }}>{totalLeads}</div><div style={{ fontSize: 10, color: C.textDim }}>Total Leads</div></div>
-        <div><div style={{ fontSize: 18, fontWeight: 800, color: closeRate >= 5 ? C.success : C.warning }}>{closeRate}%</div><div style={{ fontSize: 10, color: C.textDim }}>Close Rate</div></div>
+        <div
+          onClick={() => setShowRatio(!showRatio)}
+          style={{ cursor: "pointer", borderRadius: 8, padding: "4px 0", background: showRatio ? "rgba(255,255,255,0.04)" : "transparent", transition: "background 0.2s" }}
+        >
+          {showRatio ? (
+            <><div style={{ fontSize: 16, fontWeight: 800, color: C.gold }}>{formatRatio(totalCol, totalSales)}</div><div style={{ fontSize: 10, color: C.textDim }}>Collection : Sales <span style={{ color: C.accent, fontSize: 9 }}>▸ tap for %</span></div></>
+          ) : (
+            <><div style={{ fontSize: 18, fontWeight: 800, color: conversionPct >= 50 ? C.success : C.warning }}>{conversionPct}%</div><div style={{ fontSize: 10, color: C.textDim }}>Sales Conversion Rate <span style={{ color: C.accent, fontSize: 9 }}>▸ tap for ratio</span></div></>
+          )}
+        </div>
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
@@ -1018,7 +1047,7 @@ export default function SalesDashboard() {
                   <div style={{ fontSize: 12, color: C.textDim, marginBottom: 6 }}>{MONTH_NAMES[m]}</div>
                   <div style={{ fontSize: 20, fontWeight: 800, color: C.accent }}>{fmt(d.leads)}</div><div style={{ fontSize: 11, color: C.textDim }}>leads</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: C.success, marginTop: 4 }}>{d.sales}</div><div style={{ fontSize: 11, color: C.textDim }}>sales</div>
-                  <div style={{ marginTop: 6, ...ST.badge(d.ratio >= 5 ? C.success : C.warning) }}>{d.ratio}% close rate</div>
+                  <div style={{ marginTop: 6, ...ST.badge(d.ratio >= 50 ? C.success : C.warning) }}>{d.ratio}% conversion</div>
                 </div>
               ); })}
             </div>
