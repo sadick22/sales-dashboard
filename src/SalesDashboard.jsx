@@ -159,21 +159,49 @@ const getMonthBreakdown = (agent, field) => {
   return result;
 };
 
-// Auto-calculate company pipeline from agent data
-const calcPipeline = (agents) => {
+// Auto-calculate company pipeline from agent data (includes April backfill)
+const Q2_ALL_MONTHS = [3, 4, 5]; // April, May, June (0-indexed) — full Q2
+const calcPipeline = (agents, aprilBackfill = {}) => {
   const labels = {};
-  QUARTER_MONTHS.forEach(m => labels[m] = MONTH_NAMES[m].toLowerCase());
+  Q2_ALL_MONTHS.forEach(m => labels[m] = MONTH_NAMES[m].toLowerCase());
   const result = {};
-  QUARTER_MONTHS.forEach(m => {
+  Q2_ALL_MONTHS.forEach(m => {
     let leads = 0, sales = 0;
-    agents.forEach(a => {
-      leads += getMonthBreakdown(a, "leads")[m] || 0;
-      sales += getMonthBreakdown(a, "sales")[m] || 0;
-    });
+    if (m === 3) {
+      // April: use backfill data
+      agents.forEach(a => {
+        const bf = aprilBackfill[a.id] || {};
+        leads += bf.leads || 0;
+        sales += bf.sales || 0;
+      });
+    } else {
+      // May/June: use weekly data
+      agents.forEach(a => {
+        leads += getMonthBreakdown(a, "leads")[m] || 0;
+        sales += getMonthBreakdown(a, "sales")[m] || 0;
+      });
+    }
     const ratio = leads > 0 ? Math.round((sales / leads) * 100) : 0;
     result[labels[m]] = { leads, sales, ratio };
   });
   return result;
+};
+
+// Get Q2 total collection for an agent (April backfill + May/June weekly)
+const getAgentQ2Collection = (agent, aprilBackfill = {}) => {
+  const weeklyTotal = getMonthlyCollection(agent); // May + June weekly
+  const aprilCol = (aprilBackfill[agent.id] || {}).collections || 0;
+  return weeklyTotal + aprilCol;
+};
+
+// Get total Q2 collection across all agents
+const getTotalQ2Collection = (agents, aprilBackfill = {}) => {
+  return agents.reduce((s, a) => s + getAgentQ2Collection(a, aprilBackfill), 0);
+};
+
+// Get total April backfill collections
+const getTotalAprilCollections = (agents, aprilBackfill = {}) => {
+  return agents.reduce((s, a) => s + ((aprilBackfill[a.id] || {}).collections || 0), 0);
 };
 
 // ─── COLORS & UTILS ────────────────────────────────────────────────
@@ -295,7 +323,7 @@ function TVAll({ agents }) {
   return (<div style={{ width: "100%", maxWidth: 1600 }}><h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, textAlign: "center", color: C.accent }}>📊 Monthly Agent Collections — Target: QAR 40,000</h2><div style={ST.grid(2)}>{sorted.map((a, i) => <AgentBar key={a.id} agent={a} idx={i} />)}</div></div>);
 }
 
-function TVAgent({ agent, idx, company }) {
+function TVAgent({ agent, idx, company, aprilBackfill = {} }) {
   const c = tri(idx);
   const col = getMonthlyCollection(agent);
   const leads = getMonthlyLeads(agent);
@@ -306,11 +334,19 @@ function TVAgent({ agent, idx, company }) {
   const ringColor = exceeded ? C.gold : c;
   const qTarget = agent.target * 3;
   const mb = getMonthBreakdown(agent, "collections");
-  const qDone = QUARTER_MONTHS.reduce((s, m) => s + (mb[m]||0), 0);
+  const aprilCol = (aprilBackfill[agent.id] || {}).collections || 0;
+  const qDone = aprilCol + QUARTER_MONTHS.reduce((s, m) => s + (mb[m]||0), 0);
   const qPct = pct(qDone, qTarget);
   const qExceeded = qDone > qTarget;
-  const ratio = leads > 0 ? Math.round((sales / leads) * 100) : 0;
-  const monthData = QUARTER_MONTHS.map(m => ({ name: MONTH_NAMES[m], collection: mb[m]||0 }));
+  const aprilLeads = (aprilBackfill[agent.id] || {}).leads || 0;
+  const aprilSales = (aprilBackfill[agent.id] || {}).sales || 0;
+  const totalLeads = leads + aprilLeads;
+  const totalSales = sales + aprilSales;
+  const ratio = totalLeads > 0 ? Math.round((totalSales / totalLeads) * 100) : 0;
+  const monthData = [
+    { name: "Apr", collection: aprilCol },
+    ...QUARTER_MONTHS.map(m => ({ name: MONTH_NAMES[m], collection: mb[m]||0 }))
+  ];
   const weekData = (agent.weeklyCollections||[]).map((v, i) => ({ name: THURSDAY_LABELS[i], value: v }));
 
   return (
@@ -344,16 +380,16 @@ function TVAgent({ agent, idx, company }) {
           </div>
         </div>
         <div style={{ background: C.cardAlt, borderRadius: 12, padding: 14, width: "100%", maxWidth: 300, border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 11, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8, textAlign: "center" }}>Lead Performance</div>
+          <div style={{ fontSize: 11, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8, textAlign: "center" }}>Q2 Lead Performance</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, textAlign: "center" }}>
-            <div><div style={{ fontSize: 18, fontWeight: 800, color: C.accent }}>{leads}</div><div style={{ fontSize: 10, color: C.textDim }}>Leads</div></div>
-            <div><div style={{ fontSize: 18, fontWeight: 800, color: C.success }}>{sales}</div><div style={{ fontSize: 10, color: C.textDim }}>Sales</div></div>
+            <div><div style={{ fontSize: 18, fontWeight: 800, color: C.accent }}>{totalLeads}</div><div style={{ fontSize: 10, color: C.textDim }}>Leads</div></div>
+            <div><div style={{ fontSize: 18, fontWeight: 800, color: C.success }}>{totalSales}</div><div style={{ fontSize: 10, color: C.textDim }}>Sales</div></div>
             <div><div style={{ fontSize: 18, fontWeight: 800, color: ratio >= 5 ? C.success : C.warning }}>{ratio}%</div><div style={{ fontSize: 10, color: C.textDim }}>Close Rate</div></div>
           </div>
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 20, justifyContent: "center" }}>
-        <div style={ST.card}><div style={ST.title}>Last 3 Months Collection</div>
+        <div style={ST.card}><div style={ST.title}>Q2 Monthly Collection</div>
           <ResponsiveContainer width="100%" height={200}><BarChart data={monthData}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="name" stroke={C.textDim} fontSize={12} /><YAxis stroke={C.textDim} fontSize={12} /><Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} /><Bar dataKey="collection" fill={c} radius={[6,6,0,0]} /></BarChart></ResponsiveContainer>
         </div>
         <div style={ST.card}><div style={ST.title}>Weekly Collections</div>
@@ -366,11 +402,11 @@ function TVAgent({ agent, idx, company }) {
   );
 }
 
-function TVCompany({ company, agents }) {
-  const total = agents.reduce((s, a) => s + getMonthlyCollection(a), 0);
-  const pipeline = calcPipeline(agents);
+function TVCompany({ company, agents, aprilBackfill = {} }) {
+  const total = getTotalQ2Collection(agents, aprilBackfill);
+  const pipeline = calcPipeline(agents, aprilBackfill);
   const q2Pct = pct(total, company.q2Target);
-  const pipeData = QUARTER_MONTHS.map(m => ({ name: MONTH_NAMES[m], ...(pipeline[MONTH_NAMES[m].toLowerCase()] || { leads: 0, sales: 0, ratio: 0 }) }));
+  const pipeData = Q2_ALL_MONTHS.map(m => ({ name: MONTH_NAMES[m], ...(pipeline[MONTH_NAMES[m].toLowerCase()] || { leads: 0, sales: 0, ratio: 0 }) }));
   const qData = [{ name: "Q1", target: company.q1Target, done: company.q1Done }, { name: "Q2", target: company.q2Target, done: total }, { name: "Q3", target: company.q3Target, done: company.q3Done }, { name: "Q4", target: company.q4Target, done: company.q4Done }];
   return (
     <div style={{ width: "100%", maxWidth: 1600 }}>
@@ -413,14 +449,14 @@ function TVWeekly({ agents }) {
 }
 
 // ─── TV MODE ───────────────────────────────────────────────────────
-function TVMode({ agents, company, logo, onClose }) {
+function TVMode({ agents, company, logo, onClose, aprilBackfill = {} }) {
   const tvAgents = agents.filter(a => !a.hideFromTV);
   const sorted = [...tvAgents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
   const slides = [
-    { comp: <TVCompany company={company} agents={tvAgents} />, dur: 20000 },
+    { comp: <TVCompany company={company} agents={tvAgents} aprilBackfill={aprilBackfill} />, dur: 20000 },
     { comp: <TVAll agents={tvAgents} />, dur: 15000 },
     { comp: <TVWeekly agents={tvAgents} />, dur: 15000 },
-    ...sorted.filter(a => getMonthlyCollection(a) > 0).map((a, i) => ({ comp: <TVAgent agent={a} idx={i} company={company} />, dur: 10000 })),
+    ...sorted.filter(a => getMonthlyCollection(a) > 0).map((a, i) => ({ comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} />, dur: 10000 })),
   ];
   const [cur, setCur] = useState(0);
   const [prog, setProg] = useState(0);
@@ -652,9 +688,9 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
 }
 
 // ─── MODAL: PIPELINE (read-only, auto-calculated) ──────────────────
-function PipelineViewModal({ agents, onClose }) {
-  const pipeline = calcPipeline(agents);
-  const months = QUARTER_MONTHS.map(m => ({ key: MONTH_NAMES[m].toLowerCase(), label: `${MONTH_NAMES[m]} ${YEAR}` }));
+function PipelineViewModal({ agents, aprilBackfill = {}, onClose }) {
+  const pipeline = calcPipeline(agents, aprilBackfill);
+  const months = Q2_ALL_MONTHS.map(m => ({ key: MONTH_NAMES[m].toLowerCase(), label: `${MONTH_NAMES[m]} ${YEAR}` }));
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mc} onClick={e => e.stopPropagation()}>
       <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>📊 Company Lead Pipeline</h3>
@@ -675,6 +711,72 @@ function PipelineViewModal({ agents, onClose }) {
 }
 
 // ─── MODAL: AGENT ──────────────────────────────────────────────────
+
+// ─── MODAL: APRIL BACKFILL ────────────────────────────────────────
+function AprilBackfillModal({ agents, aprilBackfill, onSave, onClose }) {
+  const [data, setData] = useState(() => {
+    const d = {};
+    agents.forEach(a => {
+      d[a.id] = {
+        collections: (aprilBackfill[a.id] || {}).collections || 0,
+        sales: (aprilBackfill[a.id] || {}).sales || 0,
+        leads: (aprilBackfill[a.id] || {}).leads || 0,
+      };
+    });
+    return d;
+  });
+
+  const updateField = (id, field, val) => {
+    setData(prev => ({ ...prev, [id]: { ...prev[id], [field]: Number(val) || 0 } }));
+  };
+
+  const totalCol = Object.values(data).reduce((s, d) => s + (d.collections || 0), 0);
+  const totalLeads = Object.values(data).reduce((s, d) => s + (d.leads || 0), 0);
+  const totalSales = Object.values(data).reduce((s, d) => s + (d.sales || 0), 0);
+  const closeRate = totalLeads > 0 ? Math.round((totalSales / totalLeads) * 100) : 0;
+
+  return (
+    <div style={ST.modal} onClick={onClose}><div style={ST.mcWide} onClick={e => e.stopPropagation()}>
+      <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>📅 April 2026 Backfill Data</h3>
+      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 4px" }}>Enter each agent's April totals. This data feeds into Q2 quarterly totals and pipeline.</p>
+      <p style={{ fontSize: 11, color: C.warning, margin: "0 0 16px" }}>⚠️ April data does NOT affect monthly agent target progress bars (those only track May/June weekly data).</p>
+
+      <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
+        <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600 }}>Agent</div>
+        <div style={{ fontSize: 10, color: C.accent, fontWeight: 600, textAlign: "center" }}>Collections (QAR)</div>
+        <div style={{ fontSize: 10, color: C.success, fontWeight: 600, textAlign: "center" }}>Sales (Count)</div>
+        <div style={{ fontSize: 10, color: C.purple, fontWeight: 600, textAlign: "center" }}>Leads (Count)</div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: "50vh", overflowY: "auto" }}>
+        {agents.map(a => (
+          <div key={a.id} style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 1fr", gap: 6, alignItems: "center" }}>
+            <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{a.name}</span>
+            <input type="number" style={ST.inputSm} value={data[a.id]?.collections || ""} placeholder="0"
+              onChange={e => updateField(a.id, "collections", e.target.value)} />
+            <input type="number" style={ST.inputSm} value={data[a.id]?.sales || ""} placeholder="0"
+              onChange={e => updateField(a.id, "sales", e.target.value)} />
+            <input type="number" style={ST.inputSm} value={data[a.id]?.leads || ""} placeholder="0"
+              onChange={e => updateField(a.id, "leads", e.target.value)} />
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 16, padding: "14px 16px", background: C.cardAlt, borderRadius: 10, display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, textAlign: "center" }}>
+        <div><div style={{ fontSize: 18, fontWeight: 800, color: C.accent }}>{fmt(totalCol)}</div><div style={{ fontSize: 10, color: C.textDim }}>Total Collections</div></div>
+        <div><div style={{ fontSize: 18, fontWeight: 800, color: C.success }}>{totalSales}</div><div style={{ fontSize: 10, color: C.textDim }}>Total Sales</div></div>
+        <div><div style={{ fontSize: 18, fontWeight: 800, color: C.purple }}>{totalLeads}</div><div style={{ fontSize: 10, color: C.textDim }}>Total Leads</div></div>
+        <div><div style={{ fontSize: 18, fontWeight: 800, color: closeRate >= 5 ? C.success : C.warning }}>{closeRate}%</div><div style={{ fontSize: 10, color: C.textDim }}>Close Rate</div></div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+        <button style={ST.btnO} onClick={onClose}>Cancel</button>
+        <button style={ST.btn()} onClick={() => onSave(data)}>Save</button>
+      </div>
+    </div></div>
+  );
+}
+
 function AgentModal({ agent, onSave, onClose }) {
   const [form, setForm] = useState(agent ? { ...agent } : { name: "", image: "", target: 40000, hideFromTV: false });
   const [preview, setPreview] = useState(agent?.image || "");
@@ -722,6 +824,7 @@ export default function SalesDashboard() {
   const [modal, setModal] = useState(null);
   const [saving, setSaving] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [aprilBackfill, setAprilBackfill] = useState({});
   const logoRef = useRef(null);
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => { setLoggedIn(!!u); setAuthLoading(false); }); return () => u(); }, []);
@@ -761,6 +864,9 @@ export default function SalesDashboard() {
       onSnapshot(doc(db, "dashboard", "logo"), (snap) => {
         if (snap.exists()) setLogo(snap.data().url || "");
       }),
+      onSnapshot(doc(db, "dashboard", "aprilBackfill"), (snap) => {
+        if (snap.exists()) setAprilBackfill(snap.data());
+      }),
     ];
     return () => unsubs.forEach(u => u());
   }, [loggedIn]);
@@ -786,6 +892,13 @@ export default function SalesDashboard() {
     setLogo(u);
     setSaving(true);
     try { await setDoc(doc(db, "dashboard", "logo"), { url: u }); console.log("Logo saved"); } catch(e) { console.error("Save logo error:", e); alert("Failed to save logo. Image may be too large."); }
+    setSaving(false);
+  };
+
+  const saveAprilBackfill = async (data) => {
+    setAprilBackfill(data);
+    setSaving(true);
+    try { await setDoc(doc(db, "dashboard", "aprilBackfill"), data); console.log("April backfill saved"); } catch(e) { console.error("Save april backfill error:", e); alert("Failed to save April data."); }
     setSaving(false);
   };
 
@@ -819,14 +932,14 @@ export default function SalesDashboard() {
   // FIX: Show loading while Firestore data is being fetched (after login)
   if (!dataLoaded) return (<div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ textAlign: "center" }}><div style={{ width: 60, height: 60, borderRadius: 14, background: `linear-gradient(135deg, ${C.accent}, #6366f1)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: "#fff", marginBottom: 16 }}>S</div><div style={{ color: C.textDim, fontSize: 14 }}>Loading dashboard data...</div></div></div>);
 
-  const totalCol = agents.reduce((s, a) => s + getMonthlyCollection(a), 0);
+  const totalCol = getTotalQ2Collection(agents, aprilBackfill);
   const q2Pct = pct(totalCol, company.q2Target);
-  const pipeline = calcPipeline(agents);
+  const pipeline = calcPipeline(agents, aprilBackfill);
   const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
   const today = new Date();
   const dateStr = today.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} />;
+  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} />;
 
   const Dash = () => (
     <div style={ST.page}>
@@ -849,7 +962,7 @@ export default function SalesDashboard() {
           <div style={ST.card}>
             <div style={ST.title}>🔄 Lead Pipeline (Auto-calculated)</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-              {QUARTER_MONTHS.map(m => { const key = MONTH_NAMES[m].toLowerCase(); const d = pipeline[key] || { leads: 0, sales: 0, ratio: 0 }; return (
+              {Q2_ALL_MONTHS.map(m => { const key = MONTH_NAMES[m].toLowerCase(); const d = pipeline[key] || { leads: 0, sales: 0, ratio: 0 }; return (
                 <div key={m} style={{ background: C.cardAlt, borderRadius: 10, padding: 14, textAlign: "center" }}>
                   <div style={{ fontSize: 12, color: C.textDim, marginBottom: 6 }}>{MONTH_NAMES[m]}</div>
                   <div style={{ fontSize: 20, fontWeight: 800, color: C.accent }}>{fmt(d.leads)}</div><div style={{ fontSize: 11, color: C.textDim }}>leads</div>
@@ -907,6 +1020,7 @@ export default function SalesDashboard() {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <button style={{ ...ST.btn(C.accent), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "leads" })}>📋 Weekly Update Leads (Fadwa)</button>
               <button style={{ ...ST.btn(C.purple), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "collsales" })}>💰 Weekly Update Collection & Sales (Finance)</button>
+              <button style={{ ...ST.btn(C.warning), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "aprilBackfill" })}>📅 April Backfill Data</button>
               <button style={{ ...ST.btn(C.success), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "pipeline" })}>📊 View Company Lead Pipeline</button>
             </div>
           </div>
@@ -952,7 +1066,8 @@ export default function SalesDashboard() {
       {page === "dashboard" ? <Dash /> : <Settings />}
       {modal?.type === "leads" && <WeeklyLeadsModal agents={agents} onSave={handleWeeklyLeadsSave} onClose={() => setModal(null)} />}
       {modal?.type === "collsales" && <WeeklyCollSalesModal agents={agents} onSave={handleCollSalesSave} onClose={() => setModal(null)} />}
-      {modal?.type === "pipeline" && <PipelineViewModal agents={agents} onClose={() => setModal(null)} />}
+      {modal?.type === "pipeline" && <PipelineViewModal agents={agents} aprilBackfill={aprilBackfill} onClose={() => setModal(null)} />}
+      {modal?.type === "aprilBackfill" && <AprilBackfillModal agents={agents} aprilBackfill={aprilBackfill} onSave={(data) => { saveAprilBackfill(data); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === "agent" && <AgentModal agent={modal.agent} onSave={handleAgentSave} onClose={() => setModal(null)} />}
     </div>
   );
