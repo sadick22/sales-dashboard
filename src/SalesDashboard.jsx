@@ -861,7 +861,7 @@ function AprilBackfillModal({ agents, aprilBackfill, onSave, onClose }) {
           {showRatio ? (
             <><div style={{ fontSize: 16, fontWeight: 800, color: C.gold }}>{formatRatio(totalCol, totalSales)}</div><div style={{ fontSize: 10, color: C.textDim }}>Collection : Sales <span style={{ color: C.accent, fontSize: 9 }}>▸ tap for %</span></div></>
           ) : (
-            <><div style={{ fontSize: 18, fontWeight: 800, color: conversionPct >= 50 ? C.success : C.warning }}>{conversionPct}%</div><div style={{ fontSize: 10, color: C.textDim }}>Sales Conversion Rate <span style={{ color: C.accent, fontSize: 9 }}>▸ tap for ratio</span></div></>
+            <><div style={{ fontSize: 18, fontWeight: 800, color: conversionPct >= 50 ? C.success : C.warning }}>{conversionPct}%</div><div style={{ fontSize: 10, color: C.textDim }}>Conversion Ratio <span style={{ color: C.accent, fontSize: 9 }}>▸ tap for ratio</span></div></>
           )}
         </div>
       </div>
