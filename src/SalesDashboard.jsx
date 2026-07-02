@@ -451,6 +451,55 @@ function TVWeekly({ agents }) {
   );
 }
 
+// ─── SLIDE DEFINITIONS ─────────────────────────────────────────────
+const DEFAULT_SLIDE_DEFS = [
+  { id: "company", name: "Company overview", icon: "🏢", type: "fixed", defaultDur: 20000 },
+  { id: "allAgents", name: "All agents", icon: "👥", type: "fixed", defaultDur: 15000 },
+  { id: "weekly", name: "Weekly breakdown", icon: "📅", type: "fixed", defaultDur: 15000 },
+  // Agent slides are dynamically inserted here with type: "agent"
+  { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000 },
+];
+
+function buildSlideList(agents, company, aprilBackfill, tvSettings) {
+  const tvAgents = agents.filter(a => !a.hideFromTV);
+  const sorted = [...tvAgents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
+  const activeAgents = sorted.filter(a => getMonthlyCollection(a) > 0);
+
+  // Build all possible slides
+  const allSlides = [
+    { id: "company", name: "Company overview", icon: "🏢", type: "fixed", defaultDur: 20000, comp: <TVCompany company={company} agents={tvAgents} aprilBackfill={aprilBackfill} /> },
+    { id: "allAgents", name: "All agents", icon: "👥", type: "fixed", defaultDur: 15000, comp: <TVAll agents={tvAgents} /> },
+    { id: "weekly", name: "Weekly breakdown", icon: "📅", type: "fixed", defaultDur: 15000, comp: <TVWeekly agents={tvAgents} /> },
+    ...activeAgents.map((a, i) => ({ id: `agent_${a.id}`, name: a.name, icon: "", image: a.image, type: "agent", defaultDur: 10000, comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} /> })),
+    { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000, comp: <TVPodium agents={tvAgents} /> },
+  ];
+
+  if (!tvSettings || !tvSettings.slides) return allSlides.map(s => ({ ...s, visible: true, dur: s.defaultDur }));
+
+  // Apply saved settings (order, visibility, duration)
+  const savedSlides = tvSettings.slides;
+  const result = [];
+  const usedIds = new Set();
+
+  // First: add slides in saved order
+  savedSlides.forEach(saved => {
+    const match = allSlides.find(s => s.id === saved.id);
+    if (match) {
+      result.push({ ...match, visible: saved.visible !== false, dur: saved.dur || match.defaultDur });
+      usedIds.add(saved.id);
+    }
+  });
+
+  // Then: add any new slides not in saved settings (e.g. new agents)
+  allSlides.forEach(s => {
+    if (!usedIds.has(s.id)) {
+      result.push({ ...s, visible: true, dur: s.defaultDur });
+    }
+  });
+
+  return result;
+}
+
 // ─── TV PODIUM (Top 3 Leaderboard) ─────────────────────────────────
 function TVPodium({ agents }) {
   const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
@@ -519,16 +568,10 @@ function TVPodium({ agents }) {
 }
 
 // ─── TV MODE ───────────────────────────────────────────────────────
-function TVMode({ agents, company, logo, onClose, aprilBackfill = {} }) {
-  const tvAgents = agents.filter(a => !a.hideFromTV);
-  const sorted = [...tvAgents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
-  const slides = [
-    { comp: <TVCompany company={company} agents={tvAgents} aprilBackfill={aprilBackfill} />, dur: 20000 },
-    { comp: <TVAll agents={tvAgents} />, dur: 15000 },
-    { comp: <TVWeekly agents={tvAgents} />, dur: 15000 },
-    ...sorted.filter(a => getMonthlyCollection(a) > 0).map((a, i) => ({ comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} />, dur: 10000 })),
-    { comp: <TVPodium agents={tvAgents} />, dur: 15000 },
-  ];
+function TVMode({ agents, company, logo, onClose, aprilBackfill = {}, tvSettings = null }) {
+  const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings);
+  const visibleSlides = allSlides.filter(s => s.visible);
+  const slides = visibleSlides.map(s => ({ comp: s.comp, dur: s.dur }));
   const [cur, setCur] = useState(0);
   const [prog, setProg] = useState(0);
   const tRef = useRef(null), pRef = useRef(null);
@@ -951,6 +994,8 @@ export default function SalesDashboard() {
   const [saving, setSaving] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [aprilBackfill, setAprilBackfill] = useState({});
+  const [tvSettings, setTvSettings] = useState(null);
+  const [previewSlide, setPreviewSlide] = useState(null);
   const logoRef = useRef(null);
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => { setLoggedIn(!!u); setAuthLoading(false); }); return () => u(); }, []);
@@ -993,6 +1038,9 @@ export default function SalesDashboard() {
       onSnapshot(doc(db, "dashboard", "aprilBackfill"), (snap) => {
         if (snap.exists()) setAprilBackfill(snap.data());
       }),
+      onSnapshot(doc(db, "dashboard", "tvSettings"), (snap) => {
+        if (snap.exists()) setTvSettings(snap.data());
+      }),
     ];
     return () => unsubs.forEach(u => u());
   }, [loggedIn]);
@@ -1025,6 +1073,13 @@ export default function SalesDashboard() {
     setAprilBackfill(data);
     setSaving(true);
     try { await setDoc(doc(db, "dashboard", "aprilBackfill"), data); console.log("April backfill saved"); } catch(e) { console.error("Save april backfill error:", e); alert("Failed to save April data."); }
+    setSaving(false);
+  };
+
+  const saveTvSettings = async (data) => {
+    setTvSettings(data);
+    setSaving(true);
+    try { await setDoc(doc(db, "dashboard", "tvSettings"), data); console.log("TV settings saved"); } catch(e) { console.error("Save TV settings error:", e); alert("Failed to save TV settings."); }
     setSaving(false);
   };
 
@@ -1087,7 +1142,195 @@ export default function SalesDashboard() {
   const today = new Date();
   const dateStr = today.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} />;
+  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} tvSettings={tvSettings} />;
+
+  // ─── TV EDITS PAGE ────────────────────────────────────────────────
+  const TVEdits = () => {
+    const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings);
+    const [localSlides, setLocalSlides] = useState(allSlides);
+    const [dragIdx, setDragIdx] = useState(null);
+    const [editTimer, setEditTimer] = useState(null);
+
+    // Sync when allSlides change (new agents, etc.) but preserve local order/settings
+    useEffect(() => {
+      if (tvSettings && tvSettings.slides) {
+        setLocalSlides(buildSlideList(agents, company, aprilBackfill, tvSettings));
+      } else {
+        setLocalSlides(allSlides);
+      }
+    }, [agents.length]);
+
+    const saveSlides = (slides) => {
+      setLocalSlides(slides);
+      const toSave = slides.map(s => ({ id: s.id, visible: s.visible, dur: s.dur }));
+      saveTvSettings({ slides: toSave });
+    };
+
+    const toggleVisible = (idx) => {
+      const n = [...localSlides];
+      n[idx] = { ...n[idx], visible: !n[idx].visible };
+      saveSlides(n);
+    };
+
+    const updateDuration = (idx, ms) => {
+      const n = [...localSlides];
+      n[idx] = { ...n[idx], dur: ms };
+      saveSlides(n);
+    };
+
+    const moveSlide = (from, to) => {
+      if (to < 0 || to >= localSlides.length) return;
+      const n = [...localSlides];
+      const [item] = n.splice(from, 1);
+      n.splice(to, 0, item);
+      saveSlides(n);
+    };
+
+    const resetDefaults = () => {
+      if (!window.confirm("Reset all TV slide settings to default order and timers?")) return;
+      saveTvSettings({});
+      setLocalSlides(buildSlideList(agents, company, aprilBackfill, null));
+    };
+
+    const handleDragStart = (idx) => setDragIdx(idx);
+    const handleDragOver = (e, idx) => { e.preventDefault(); };
+    const handleDrop = (e, idx) => {
+      e.preventDefault();
+      if (dragIdx !== null && dragIdx !== idx) moveSlide(dragIdx, idx);
+      setDragIdx(null);
+    };
+
+    const visibleCount = localSlides.filter(s => s.visible).length;
+    let visibleNum = 0;
+
+    return (
+      <div style={ST.page}>
+        {saving && <div style={{ position: "fixed", top: 60, right: 24, padding: "8px 16px", borderRadius: 8, background: C.accent, color: "#000", fontWeight: 600, fontSize: 13, zIndex: 150 }}>💾 Saving to cloud...</div>}
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.text }}>📺 TV Slide Manager</div>
+            <div style={{ fontSize: 12, color: C.textDim, marginTop: 4 }}>Drag to reorder, toggle visibility, adjust timers, preview slides &nbsp;·&nbsp; {visibleCount} of {localSlides.length} slides active</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={ST.btnO} onClick={resetDefaults}>🔄 Reset to default</button>
+            <button style={ST.btn()} onClick={() => setTvMode(true)}>▶️ Launch TV</button>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
+          {localSlides.map((slide, idx) => {
+            if (slide.visible) visibleNum++;
+            const isHidden = !slide.visible;
+            const durSec = Math.round(slide.dur / 1000);
+            return (
+              <div
+                key={slide.id}
+                draggable
+                onDragStart={() => handleDragStart(idx)}
+                onDragOver={(e) => handleDragOver(e, idx)}
+                onDrop={(e) => handleDrop(e, idx)}
+                style={{
+                  background: C.card, borderRadius: 12, overflow: "hidden",
+                  border: `1px solid ${dragIdx === idx ? C.accent : isHidden ? C.border : C.border}`,
+                  opacity: isHidden ? 0.45 : 1, transition: "opacity 0.2s, border-color 0.2s",
+                  cursor: "grab",
+                }}
+              >
+                {/* Slide preview area */}
+                <div style={{ height: 90, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "center", position: "relative", borderBottom: `1px solid ${C.border}` }}>
+                  {slide.image ? (
+                    <img src={slide.image} alt="" style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", opacity: 0.7 }} />
+                  ) : (
+                    <span style={{ fontSize: 28, opacity: 0.3 }}>{slide.icon || "👤"}</span>
+                  )}
+                  {/* Position badge */}
+                  <div style={{ position: "absolute", top: 6, left: 8, padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700, background: isHidden ? `${C.textDim}30` : `${C.accent}25`, color: isHidden ? C.textDim : C.accent }}>
+                    {isHidden ? "—" : visibleNum}
+                  </div>
+                  {/* Preview eye */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setPreviewSlide(slide); }}
+                    style={{ position: "absolute", top: 6, right: 8, background: "none", border: "none", cursor: "pointer", padding: "2px 4px", fontSize: 16, color: isHidden ? C.textDim : C.text, opacity: 0.7 }}
+                    title="Preview this slide"
+                  >
+                    {isHidden ? "👁️‍🗨️" : "👁️"}
+                  </button>
+                </div>
+
+                {/* Slide info */}
+                <div style={{ padding: "10px 12px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                    <span style={{ fontSize: 14, color: C.textDim, cursor: "grab" }}>⠿</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: isHidden ? C.textDim : C.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {slide.name} {isHidden && <span style={{ fontSize: 10, color: C.warning, marginLeft: 4 }}>hidden</span>}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    {/* Timer */}
+                    {editTimer === idx ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 12, color: C.textDim }}>⏱</span>
+                        <input
+                          type="number" min="5" max="120" value={durSec}
+                          style={{ ...ST.inputSm, width: 50, padding: "4px 6px", fontSize: 12 }}
+                          onChange={e => {
+                            const v = Math.max(5, Math.min(120, Number(e.target.value) || 10));
+                            const n = [...localSlides]; n[idx] = { ...n[idx], dur: v * 1000 }; setLocalSlides(n);
+                          }}
+                          onBlur={() => { saveSlides(localSlides); setEditTimer(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") { saveSlides(localSlides); setEditTimer(null); } }}
+                          autoFocus
+                        />
+                        <span style={{ fontSize: 11, color: C.textDim }}>sec</span>
+                      </div>
+                    ) : (
+                      <div onClick={() => setEditTimer(idx)} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", padding: "2px 0" }} title="Click to edit duration">
+                        <span style={{ fontSize: 12, color: C.textDim }}>⏱</span>
+                        <span style={{ fontSize: 12, color: C.textDim }}>{durSec}s</span>
+                      </div>
+                    )}
+                    {/* Visibility toggle */}
+                    <div
+                      onClick={() => toggleVisible(idx)}
+                      style={{ width: 38, height: 20, borderRadius: 10, background: slide.visible ? C.accent : "#334155", cursor: "pointer", position: "relative", transition: "background 0.2s ease", flexShrink: 0 }}
+                    >
+                      <div style={{ width: 16, height: 16, borderRadius: "50%", background: "#fff", position: "absolute", top: 2, left: slide.visible ? 20 : 2, transition: "left 0.2s ease", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
+                    </div>
+                  </div>
+
+                  {/* Move arrows */}
+                  <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 8, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+                    <button
+                      style={{ ...ST.btnO, padding: "2px 10px", fontSize: 11, opacity: idx === 0 ? 0.3 : 1 }}
+                      onClick={() => moveSlide(idx, idx - 1)}
+                      disabled={idx === 0}
+                    >◀ Move up</button>
+                    <button
+                      style={{ ...ST.btnO, padding: "2px 10px", fontSize: 11, opacity: idx === localSlides.length - 1 ? 0.3 : 1 }}
+                      onClick={() => moveSlide(idx, idx + 1)}
+                      disabled={idx === localSlides.length - 1}
+                    >Move down ▶</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Info bar */}
+        <div style={{ marginTop: 20, padding: "14px 18px", background: C.cardAlt, borderRadius: 10, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 16 }}>ℹ️</span>
+          <div style={{ fontSize: 12, color: C.textDim }}>
+            <span style={{ marginRight: 16 }}>👁️ Preview opens full-screen view</span>
+            <span style={{ marginRight: 16 }}>⠿ Drag or use arrows to reorder</span>
+            <span style={{ marginRight: 16 }}>⏱ Click timer to edit duration (5–120 sec)</span>
+            <span>Toggle turns slides on/off · All changes save to the cloud</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const Dash = () => {
     // This Week calculations
@@ -1258,17 +1501,34 @@ export default function SalesDashboard() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={ST.navBtn(page === "dashboard")} onClick={() => setPage("dashboard")}>📊 Dashboard</button>
+          <button style={ST.navBtn(page === "tvEdits")} onClick={() => setPage("tvEdits")}>📺 TV Edits</button>
           <button style={ST.navBtn(page === "settings")} onClick={() => setPage("settings")}>⚙️ Settings</button>
-          <button style={{ ...ST.navBtn(false), background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff" }} onClick={() => setTvMode(true)}>📺 TV Mode</button>
+          <button style={{ ...ST.navBtn(false), background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff" }} onClick={() => setTvMode(true)}>▶️ TV Mode</button>
           <button style={{ ...ST.navBtn(false), color: C.danger }} onClick={async () => { await signOut(auth); }}>🚪 Logout</button>
         </div>
       </nav>
-      {page === "dashboard" ? <Dash /> : <Settings />}
+      {page === "dashboard" ? <Dash /> : page === "tvEdits" ? <TVEdits /> : <Settings />}
       {modal?.type === "leads" && <WeeklyLeadsModal agents={agents} onSave={handleWeeklyLeadsSave} onClose={() => setModal(null)} />}
       {modal?.type === "collsales" && <WeeklyCollSalesModal agents={agents} onSave={handleCollSalesSave} onClose={() => setModal(null)} />}
       {modal?.type === "pipeline" && <PipelineViewModal agents={agents} aprilBackfill={aprilBackfill} onClose={() => setModal(null)} />}
       {modal?.type === "aprilBackfill" && <AprilBackfillModal agents={agents} aprilBackfill={aprilBackfill} onSave={(data) => { saveAprilBackfill(data); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === "agent" && <AgentModal agent={modal.agent} onSave={handleAgentSave} onClose={() => setModal(null)} />}
+      {/* Preview single slide */}
+      {previewSlide && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: C.bg, display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 24px", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 16 }}>{previewSlide.icon || "👤"}</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: C.text }}>Preview: {previewSlide.name}</span>
+              <span style={{ fontSize: 12, color: C.textDim }}>⏱ {Math.round(previewSlide.dur / 1000)}s</span>
+            </div>
+            <button style={{ ...ST.btn(C.danger), padding: "6px 14px" }} onClick={() => setPreviewSlide(null)}>✕ Close Preview</button>
+          </div>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 32, overflow: "hidden" }}>
+            {previewSlide.comp}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
