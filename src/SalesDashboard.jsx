@@ -101,16 +101,46 @@ function getWeekSalesLabel(wi, thursdays) {
 }
 
 const YEAR = new Date().getFullYear();
-const QUARTER = getCurrentQuarter();
-const THURSDAYS = getCustomThursdays(); // May 7 through Jun 25, 2026
-const THURSDAY_LABELS = THURSDAYS.map(formatThursday);
-const NUM_WEEKS = THURSDAYS.length;
-const QUARTER_MONTHS = [4, 5]; // May and June (0-indexed) since we start from May
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
+function getCurrentQuarterNum() {
+  return Math.floor(new Date().getMonth() / 3) + 1;
+}
+
+// Get months for any quarter (0-indexed)
+function getQuarterMonths(q) {
+  const start = (q - 1) * 3;
+  return [start, start + 1, start + 2];
+}
+
+// Get Thursdays for any quarter
+function getQThursdays(year, q) {
+  const startMonth = (q - 1) * 3;
+  const start = new Date(year, startMonth, 1);
+  const end = new Date(year, startMonth + 3, 0);
+  const thursdays = [];
+  const d = new Date(start);
+  while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
+  while (d <= end) {
+    thursdays.push(new Date(d));
+    d.setDate(d.getDate() + 7);
+  }
+  return thursdays;
+}
+
+// Legacy constants for backward compat with stored data (May 7 - Jun 25 custom range)
+const LEGACY_THURSDAYS = getCustomThursdays();
+const LEGACY_LABELS = LEGACY_THURSDAYS.map(formatThursday);
+const LEGACY_NUM_WEEKS = LEGACY_THURSDAYS.length;
+const QUARTER_MONTHS = [4, 5]; // Legacy: May and June only
+
+// Dynamic helpers
+const makeEmptyWeeksForQ = (q) => new Array(getQThursdays(YEAR, q).length).fill(0);
+const makeEmptySalesForQ = (q) => getQThursdays(YEAR, q).map(() => ({ prev: 0, current: 0, total: 0 }));
+
 // ─── DEFAULT DATA ──────────────────────────────────────────────────
-const makeEmptyWeeks = () => new Array(NUM_WEEKS).fill(0);
-const makeEmptySales = () => THURSDAYS.map(() => ({ prev: 0, current: 0, total: 0 }));
+const makeEmptyWeeks = () => new Array(LEGACY_NUM_WEEKS).fill(0);
+const makeEmptySales = () => LEGACY_THURSDAYS.map(() => ({ prev: 0, current: 0, total: 0 }));
 
 const DEFAULT_AGENTS = [
   { id: "a1", name: "Seyf", image: "", target: 40000 },
@@ -146,11 +176,11 @@ const getMonthlyCollection = (agent) => sumArr(agent.weeklyCollections);
 const getMonthlyLeads = (agent) => sumArr(agent.weeklyLeads);
 const getMonthlySales = (agent) => (agent.weeklySales || []).reduce((s, w) => s + (w.total || 0), 0);
 
-// Get monthly breakdown by month index (3=Apr, 4=May, 5=Jun)
+// Get monthly breakdown by month index — uses LEGACY thursdays for stored data
 const getMonthBreakdown = (agent, field) => {
   const result = {};
   QUARTER_MONTHS.forEach(m => result[m] = 0);
-  THURSDAYS.forEach((t, i) => {
+  LEGACY_THURSDAYS.forEach((t, i) => {
     const m = getMonthFromThursday(t);
     if (field === "leads") result[m] = (result[m]||0) + ((agent.weeklyLeads || [])[i] || 0);
     else if (field === "collections") result[m] = (result[m]||0) + ((agent.weeklyCollections || [])[i] || 0);
@@ -159,51 +189,96 @@ const getMonthBreakdown = (agent, field) => {
   return result;
 };
 
-// Auto-calculate company pipeline from agent data (includes April backfill)
-const Q2_ALL_MONTHS = [3, 4, 5]; // April, May, June (0-indexed) — full Q2
-const calcPipeline = (agents, aprilBackfill = {}) => {
-  const labels = {};
-  Q2_ALL_MONTHS.forEach(m => labels[m] = MONTH_NAMES[m].toLowerCase());
+// Pipeline for any quarter — Q2 uses backfill + weekly, others use monthly data when available
+const calcPipeline = (agents, q, aprilBackfill = {}, quarterMonthlyData = {}) => {
+  const qMonths = getQuarterMonths(q);
   const result = {};
-  Q2_ALL_MONTHS.forEach(m => {
+  qMonths.forEach(m => {
     let leads = 0, sales = 0, collections = 0;
-    if (m === 3) {
-      // April: use backfill data
-      agents.forEach(a => {
-        const bf = aprilBackfill[a.id] || {};
-        leads += bf.leads || 0;
-        sales += bf.sales || 0;
-        collections += bf.collections || 0;
-      });
-    } else {
-      // May/June: use weekly data
-      agents.forEach(a => {
-        leads += getMonthBreakdown(a, "leads")[m] || 0;
-        sales += getMonthBreakdown(a, "sales")[m] || 0;
-        collections += getMonthBreakdown(a, "collections")[m] || 0;
-      });
+    if (q === 2) {
+      if (m === 3) {
+        // April: use backfill
+        agents.forEach(a => {
+          const bf = aprilBackfill[a.id] || {};
+          leads += bf.leads || 0;
+          sales += bf.sales || 0;
+          collections += bf.collections || 0;
+        });
+      } else {
+        // May/June: use weekly data
+        agents.forEach(a => {
+          leads += getMonthBreakdown(a, "leads")[m] || 0;
+          sales += getMonthBreakdown(a, "sales")[m] || 0;
+          collections += getMonthBreakdown(a, "collections")[m] || 0;
+        });
+      }
     }
     const ratio = sales > 0 ? Math.round((collections / sales) * 100) : 0;
-    result[labels[m]] = { leads, sales, collections, ratio };
+    result[MONTH_NAMES[m].toLowerCase()] = { leads, sales, collections, ratio };
   });
   return result;
 };
 
 // Get Q2 total collection for an agent (April backfill + May/June weekly)
 const getAgentQ2Collection = (agent, aprilBackfill = {}) => {
-  const weeklyTotal = getMonthlyCollection(agent); // May + June weekly
+  const weeklyTotal = getMonthlyCollection(agent);
   const aprilCol = (aprilBackfill[agent.id] || {}).collections || 0;
   return weeklyTotal + aprilCol;
 };
 
-// Get total Q2 collection across all agents
-const getTotalQ2Collection = (agents, aprilBackfill = {}) => {
-  return agents.reduce((s, a) => s + getAgentQ2Collection(a, aprilBackfill), 0);
+// Get total collection for selected quarter
+const getQuarterTotal = (agents, q, aprilBackfill = {}) => {
+  if (q === 2) return agents.reduce((s, a) => s + getAgentQ2Collection(a, aprilBackfill), 0);
+  return 0; // Other quarters: no data yet (Phase 2)
 };
 
-// Get total April backfill collections
-const getTotalAprilCollections = (agents, aprilBackfill = {}) => {
-  return agents.reduce((s, a) => s + ((aprilBackfill[a.id] || {}).collections || 0), 0);
+// Get quarter target from company data
+const getQuarterTarget = (company, q) => {
+  return company[`q${q}Target`] || 0;
+};
+
+// Get quarter done from company data (for completed quarters)
+const getQuarterDone = (company, q) => {
+  return company[`q${q}Done`] || 0;
+};
+
+// ─── MONTH-SPECIFIC HELPERS ────────────────────────────────────────
+// Get agent's data for a specific month from weekly arrays + monthly overrides + april backfill
+const getAgentMonthData = (agent, monthIdx, aprilBackfill = {}, monthlyData = {}) => {
+  // Check monthly overrides first (user-entered monthly totals)
+  const mKey = `m${monthIdx}`;
+  const override = monthlyData[mKey] && monthlyData[mKey][agent.id];
+  if (override) return { collections: override.collections || 0, sales: override.sales || 0, leads: override.leads || 0, source: "monthly" };
+
+  // April uses backfill
+  if (monthIdx === 3) {
+    const bf = aprilBackfill[agent.id] || {};
+    return { collections: bf.collections || 0, sales: bf.sales || 0, leads: bf.leads || 0, source: "backfill" };
+  }
+
+  // May/June: derive from weekly data
+  let collections = 0, sales = 0, leads = 0;
+  LEGACY_THURSDAYS.forEach((t, i) => {
+    if (t.getMonth() === monthIdx) {
+      collections += (agent.weeklyCollections || [])[i] || 0;
+      sales += ((agent.weeklySales || [])[i] || {}).total || 0;
+      leads += (agent.weeklyLeads || [])[i] || 0;
+    }
+  });
+  return { collections, sales, leads, source: "weekly" };
+};
+
+// Get Thursdays within a specific month
+const getMonthThursdays = (monthIdx) => {
+  const indices = [];
+  const labels = [];
+  LEGACY_THURSDAYS.forEach((t, i) => {
+    if (t.getMonth() === monthIdx) {
+      indices.push(i);
+      labels.push(formatThursday(t));
+    }
+  });
+  return { indices, labels };
 };
 
 // ─── COLORS & UTILS ────────────────────────────────────────────────
@@ -285,35 +360,56 @@ function Ring({ percent, size = 120, stroke = 10, color = C.accent }) {
   return (<svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}><circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={stroke} /><circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeDasharray={circ} strokeDashoffset={off} strokeLinecap="round" style={{ transition: "stroke-dashoffset 1.5s ease" }} /><text x={size/2} y={size/2} textAnchor="middle" dominantBaseline="central" fill={C.text} fontSize={size*0.22} fontWeight="800" style={{ transform: "rotate(90deg)", transformOrigin: "center" }}>{percent}%</text></svg>);
 }
 
-// ─── AGENT BAR ─────────────────────────────────────────────────────
-function AgentBar({ agent, idx }) {
+// ─── AGENT CARD (Redesigned — Collections & Sales equal) ───────────
+function AgentCard({ agent, idx, aprilBackfill = {}, selectedMonth, monthlyData = {} }) {
   const c = tri(idx);
-  const col = getMonthlyCollection(agent);
+  // Use month-specific data if available (passed as _month* props), otherwise derive
+  const md = agent._monthCol !== undefined
+    ? { collections: agent._monthCol, sales: agent._monthSales, leads: agent._monthLeads }
+    : getAgentMonthData(agent, selectedMonth || new Date().getMonth(), aprilBackfill, monthlyData);
+  const col = md.collections;
+  const sales = md.sales;
+  const leads = md.leads;
   const p = pct(col, agent.target);
   const exceeded = col > agent.target;
   const diff = agent.target - col;
-  const shimmerStyle = exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite', borderLeft: `3px solid ${C.gold}` } : {};
+  const shimmerStyle = exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite', border: `1px solid ${C.gold}40` } : {};
   return (
-    <div style={{ ...ST.row(exceeded ? C.gold : c), ...shimmerStyle }}>
-      {agent.image ? <img src={agent.image} alt={agent.name} style={ST.avImg} /> : <div style={ST.av(c)}>{initials(agent.name)}</div>}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+    <div style={{ background: C.card, borderRadius: 12, padding: 14, border: `1px solid ${C.border}`, ...shimmerStyle }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        {agent.image ? <img src={agent.image} alt={agent.name} style={ST.avImg} /> : <div style={ST.av(c)}>{initials(agent.name)}</div>}
+        <div style={{ flex: 1 }}>
           <span style={{ fontWeight: 600, fontSize: 14, color: "#f1f5f9" }}>
             {agent.name} {exceeded && <span style={{ animation: 'starPulse 2s ease-in-out infinite', display: 'inline-block', fontSize: 12 }}>⭐</span>}
           </span>
-          <span style={{ fontWeight: 700, fontSize: 14, color: exceeded ? C.gold : c }}>{fmt(col)} QAR</span>
+          <div style={{ fontSize: 11, color: C.textDim }}>Target: {fmt(agent.target)} QAR</div>
         </div>
-        <div style={ST.barBg}><div style={ST.barFill(p, exceeded ? C.gold : c)} /></div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 11, color: C.textDim }}>
-          <span style={{ color: "#94a3b8" }}>Target: {fmt(agent.target)} QAR</span>
-          {exceeded ? (
-            <span style={{ color: C.success, fontWeight: 600 }}>🎯 +{fmt(Math.abs(diff))} QAR exceeded</span>
-          ) : col === agent.target ? (
-            <span style={{ color: C.success, fontWeight: 600 }}>✓ Target reached!</span>
-          ) : (
-            <span style={{ color: C.warning }}>{fmt(Math.abs(diff))} QAR remaining</span>
-          )}
+        <div style={{ ...ST.badge(p >= 100 ? C.success : p >= 50 ? C.accent : C.warning) }}>{p}%</div>
+      </div>
+      {/* Two big metrics */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+        <div style={{ background: C.cardAlt, borderRadius: 8, padding: "8px 10px", textAlign: "center" }}>
+          <div style={{ fontSize: 10, color: C.textDim, marginBottom: 2 }}>💰 Collections</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: exceeded ? C.gold : c }}>{fmt(col)}</div>
+          <div style={{ fontSize: 9, color: C.textDim }}>QAR</div>
         </div>
+        <div style={{ background: C.cardAlt, borderRadius: 8, padding: "8px 10px", textAlign: "center" }}>
+          <div style={{ fontSize: 10, color: C.textDim, marginBottom: 2 }}>📈 Sales</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: C.success }}>{fmt(sales)}</div>
+          <div style={{ fontSize: 9, color: C.textDim }}>count</div>
+        </div>
+      </div>
+      {/* Progress bar */}
+      <div style={ST.barBg}><div style={ST.barFill(p, exceeded ? C.gold : c)} /></div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 10, color: C.textDim }}>
+        <span>Leads: {leads}</span>
+        {exceeded ? (
+          <span style={{ color: C.success, fontWeight: 600 }}>🎯 +{fmt(Math.abs(diff))} exceeded</span>
+        ) : col === agent.target ? (
+          <span style={{ color: C.success, fontWeight: 600 }}>✓ Target reached!</span>
+        ) : (
+          <span style={{ color: C.warning }}>{fmt(Math.abs(diff))} remaining</span>
+        )}
       </div>
     </div>
   );
@@ -322,7 +418,7 @@ function AgentBar({ agent, idx }) {
 // ─── TV SLIDES ─────────────────────────────────────────────────────
 function TVAll({ agents }) {
   const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
-  return (<div style={{ width: "100%", maxWidth: 1600 }}><h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, textAlign: "center", color: C.accent }}>📊 Monthly Agent Collections — Target: QAR 40,000</h2><div style={ST.grid(2)}>{sorted.map((a, i) => <AgentBar key={a.id} agent={a} idx={i} />)}</div></div>);
+  return (<div style={{ width: "100%", maxWidth: 1600 }}><h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, textAlign: "center", color: C.accent }}>📊 Monthly Agent Performance</h2><div style={ST.grid(3)}>{sorted.map((a, i) => <AgentCard key={a.id} agent={a} idx={i} />)}</div></div>);
 }
 
 function TVAgent({ agent, idx, company, aprilBackfill = {} }) {
@@ -336,68 +432,99 @@ function TVAgent({ agent, idx, company, aprilBackfill = {} }) {
   const ringColor = exceeded ? C.gold : c;
   const qTarget = agent.target * 3;
   const mb = getMonthBreakdown(agent, "collections");
-  const aprilCol = (aprilBackfill[agent.id] || {}).collections || 0;
+  const mbSales = getMonthBreakdown(agent, "sales");
+  const mbLeads = getMonthBreakdown(agent, "leads");
+  const aprilBf = aprilBackfill[agent.id] || {};
+  const aprilCol = aprilBf.collections || 0;
+  const aprilSales = aprilBf.sales || 0;
+  const aprilLeads = aprilBf.leads || 0;
   const qDone = aprilCol + QUARTER_MONTHS.reduce((s, m) => s + (mb[m]||0), 0);
   const qPct = pct(qDone, qTarget);
   const qExceeded = qDone > qTarget;
-  const aprilLeads = (aprilBackfill[agent.id] || {}).leads || 0;
-  const aprilSales = (aprilBackfill[agent.id] || {}).sales || 0;
-  const totalLeads = leads + aprilLeads;
   const totalSales = sales + aprilSales;
+  const totalLeads = leads + aprilLeads;
   const totalCollections = col + aprilCol;
   const ratio = totalSales > 0 ? Math.round((totalCollections / totalSales) * 100) : 0;
-  const monthData = [
-    { name: "Apr", collection: aprilCol },
-    ...QUARTER_MONTHS.map(m => ({ name: MONTH_NAMES[m], collection: mb[m]||0 }))
+  // Monthly sales data for bar chart
+  const monthSalesData = [
+    { name: "Apr", value: aprilSales },
+    ...QUARTER_MONTHS.map(m => ({ name: MONTH_NAMES[m], value: mbSales[m]||0 }))
   ];
-  const weekData = (agent.weeklyCollections||[]).map((v, i) => ({ name: THURSDAY_LABELS[i], value: v }));
+  // Weekly sales data for line chart
+  const weekSalesData = (agent.weeklySales||[]).map((s, i) => ({ name: LEGACY_LABELS[i], value: s.total || 0 }));
+  // Quarterly breakdown data
+  const qBreakdown = [
+    { month: "Apr", col: aprilCol, sales: aprilSales, leads: aprilLeads },
+    ...QUARTER_MONTHS.map(m => ({ month: MONTH_NAMES[m], col: mb[m]||0, sales: mbSales[m]||0, leads: mbLeads[m]||0 })),
+  ];
 
   return (
     <div style={{ width: "100%", maxWidth: 1400, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
-        {agent.image ? <img src={agent.image} alt={agent.name} style={{ width: 110, height: 110, borderRadius: "50%", border: `4px solid ${exceeded ? C.gold : c}`, objectFit: "cover", ...(exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite' } : {}) }} /> : <div style={{ ...ST.av(c), width: 110, height: 110, fontSize: 36, ...(exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite', background: `linear-gradient(135deg, ${C.gold}, ${C.gold}88)` } : {}) }}>{initials(agent.name)}</div>}
-        <h2 style={{ fontSize: 32, fontWeight: 800, margin: 0, color: "#f1f5f9" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
+        {agent.image ? <img src={agent.image} alt={agent.name} style={{ width: 90, height: 90, borderRadius: "50%", border: `3px solid ${exceeded ? C.gold : c}`, objectFit: "cover", ...(exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite' } : {}) }} /> : <div style={{ ...ST.av(c), width: 90, height: 90, fontSize: 28, ...(exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite', background: `linear-gradient(135deg, ${C.gold}, ${C.gold}88)` } : {}) }}>{initials(agent.name)}</div>}
+        <h2 style={{ fontSize: 24, fontWeight: 800, margin: 0, color: "#f1f5f9" }}>
           {agent.name} {exceeded && <span style={{ animation: 'starPulse 2s ease-in-out infinite', display: 'inline-block' }}>⭐</span>}
         </h2>
-        <Ring percent={Math.min(p, 100)} size={150} stroke={12} color={ringColor} />
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 13, color: C.textDim }}>Monthly Collection</div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: exceeded ? C.gold : c }}>{fmt(col)} QAR</div>
-          {exceeded ? (
-            <div style={{ fontSize: 13, marginTop: 2 }}>
-              <span style={{ color: C.success, fontWeight: 600 }}>🎯 +{fmt(Math.abs(diff))} QAR exceeded target!</span>
-            </div>
-          ) : col === agent.target ? (
-            <div style={{ fontSize: 13, color: C.success, fontWeight: 600, marginTop: 2 }}>✓ Target reached!</div>
-          ) : (
-            <div style={{ fontSize: 13, color: C.warning, marginTop: 2 }}>{fmt(Math.abs(diff))} QAR remaining</div>
-          )}
-        </div>
-        <div style={{ background: C.cardAlt, borderRadius: 12, padding: 14, width: "100%", maxWidth: 300, textAlign: "center", border: `1px solid ${qExceeded ? C.gold : C.border}`, ...(qExceeded ? { animation: 'goldShimmer 3s ease-in-out infinite' } : {}) }}>
-          <div style={{ fontSize: 11, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>Q{QUARTER} Quarterly Target</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>{fmt(qTarget)} QAR</div>
-          <div style={{ ...ST.barBg, margin: "8px 0" }}><div style={ST.barFill(Math.min(qPct, 100), qExceeded ? C.gold : c)} /></div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-            <span style={{ color: C.textDim }}>Done: <span style={{ color: qExceeded ? C.gold : c, fontWeight: 600 }}>{fmt(qDone)}</span></span>
-            <span style={{ color: qPct >= 100 ? C.gold : qPct >= 50 ? C.success : C.warning, fontWeight: 700 }}>{qPct}%</span>
+        {/* Two big metrics side by side */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, width: "100%", maxWidth: 320 }}>
+          <div style={{ background: C.cardAlt, borderRadius: 10, padding: 12, textAlign: "center", border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>Collections</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: exceeded ? C.gold : c }}>{fmt(col)}</div>
+            <div style={{ fontSize: 10, color: C.textDim }}>QAR</div>
+          </div>
+          <div style={{ background: C.cardAlt, borderRadius: 10, padding: 12, textAlign: "center", border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>Sales</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.success }}>{fmt(sales)}</div>
+            <div style={{ fontSize: 10, color: C.textDim }}>count</div>
           </div>
         </div>
-        <div style={{ background: C.cardAlt, borderRadius: 12, padding: 14, width: "100%", maxWidth: 300, border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 11, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8, textAlign: "center" }}>Q2 Lead Performance</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, textAlign: "center" }}>
-            <div><div style={{ fontSize: 18, fontWeight: 800, color: C.accent }}>{totalLeads}</div><div style={{ fontSize: 10, color: C.textDim }}>Leads</div></div>
-            <div><div style={{ fontSize: 18, fontWeight: 800, color: C.success }}>{totalSales}</div><div style={{ fontSize: 10, color: C.textDim }}>Sales</div></div>
-            <div><div style={{ fontSize: 18, fontWeight: 800, color: ratio >= 50 ? C.success : C.warning }}>{ratio}%</div><div style={{ fontSize: 10, color: C.textDim }}>Conversion Rate</div></div>
+        {/* Target progress */}
+        <div style={{ background: C.cardAlt, borderRadius: 10, padding: 12, width: "100%", maxWidth: 320, border: `1px solid ${exceeded ? C.gold + "40" : C.border}` }}>
+          <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4, textAlign: "center" }}>Monthly target progress</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+            <span style={{ fontSize: 16, fontWeight: 800, color: exceeded ? C.gold : c }}>{fmt(col)} QAR</span>
+            <span style={{ fontSize: 12, color: p >= 100 ? C.gold : p >= 50 ? C.success : C.warning, fontWeight: 700 }}>{p}%</span>
           </div>
+          <div style={ST.barBg}><div style={ST.barFill(Math.min(p, 100), exceeded ? C.gold : c)} /></div>
+          {exceeded ? <div style={{ fontSize: 10, color: C.success, fontWeight: 600, marginTop: 4, textAlign: "center" }}>🎯 +{fmt(Math.abs(diff))} QAR exceeded!</div>
+            : <div style={{ fontSize: 10, color: C.warning, marginTop: 4, textAlign: "center" }}>{fmt(Math.abs(diff))} QAR remaining</div>}
+        </div>
+        {/* Quarterly breakdown table */}
+        <div style={{ background: C.cardAlt, borderRadius: 10, padding: 12, width: "100%", maxWidth: 320, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8, textAlign: "center" }}>Q2 quarterly breakdown</div>
+          <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+            <thead><tr>
+              <th style={{ textAlign: "left", padding: "3px 0", color: C.textDim, fontWeight: 600 }}></th>
+              <th style={{ textAlign: "right", padding: "3px 4px", color: C.gold, fontWeight: 600, fontSize: 10 }}>Coll</th>
+              <th style={{ textAlign: "right", padding: "3px 4px", color: C.success, fontWeight: 600, fontSize: 10 }}>Sales</th>
+              <th style={{ textAlign: "right", padding: "3px 4px", color: C.purple, fontWeight: 600, fontSize: 10 }}>Leads</th>
+            </tr></thead>
+            <tbody>
+              {qBreakdown.map(r => (
+                <tr key={r.month} style={{ borderTop: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "4px 0", color: "#94a3b8", fontWeight: 600 }}>{r.month}</td>
+                  <td style={{ textAlign: "right", padding: "4px 4px", color: C.text }}>{r.col > 0 ? fmt(r.col) : "—"}</td>
+                  <td style={{ textAlign: "right", padding: "4px 4px", color: C.text }}>{r.sales > 0 ? fmt(r.sales) : "—"}</td>
+                  <td style={{ textAlign: "right", padding: "4px 4px", color: C.text }}>{r.leads > 0 ? fmt(r.leads) : "—"}</td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: `1px solid ${C.accent}40` }}>
+                <td style={{ padding: "4px 0", color: C.accent, fontWeight: 700 }}>Total</td>
+                <td style={{ textAlign: "right", padding: "4px 4px", color: C.accent, fontWeight: 700 }}>{fmt(totalCollections)}</td>
+                <td style={{ textAlign: "right", padding: "4px 4px", color: C.accent, fontWeight: 700 }}>{fmt(totalSales)}</td>
+                <td style={{ textAlign: "right", padding: "4px 4px", color: C.accent, fontWeight: 700 }}>{fmt(totalLeads)}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 20, justifyContent: "center" }}>
-        <div style={ST.card}><div style={ST.title}>Q2 Monthly Collection</div>
-          <ResponsiveContainer width="100%" height={200}><BarChart data={monthData}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="name" stroke={C.textDim} fontSize={12} /><YAxis stroke={C.textDim} fontSize={12} /><Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} /><Bar dataKey="collection" fill={c} radius={[6,6,0,0]} /></BarChart></ResponsiveContainer>
+        <div style={ST.card}><div style={{ ...ST.title, color: C.success }}>Q2 monthly sales</div>
+          <ResponsiveContainer width="100%" height={180}><BarChart data={monthSalesData}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="name" stroke={C.textDim} fontSize={12} /><YAxis stroke={C.textDim} fontSize={12} /><Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} /><Bar dataKey="value" fill={C.success} name="Sales" radius={[6,6,0,0]} /></BarChart></ResponsiveContainer>
         </div>
-        <div style={ST.card}><div style={ST.title}>Weekly Collections</div>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={weekData}><defs><linearGradient id={`g${idx}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={c} stopOpacity={0.3} /><stop offset="95%" stopColor={c} stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="name" stroke={C.textDim} fontSize={10} /><YAxis stroke={C.textDim} fontSize={10} /><Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} /><Area type="monotone" dataKey="value" stroke={c} fill={`url(#g${idx})`} strokeWidth={2} /></AreaChart>
+        <div style={ST.card}><div style={{ ...ST.title, color: C.success }}>Weekly sales</div>
+          <ResponsiveContainer width="100%" height={180}>
+            <AreaChart data={weekSalesData}><defs><linearGradient id={`gs${idx}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.success} stopOpacity={0.3} /><stop offset="95%" stopColor={C.success} stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="name" stroke={C.textDim} fontSize={10} /><YAxis stroke={C.textDim} fontSize={10} /><Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} /><Area type="monotone" dataKey="value" stroke={C.success} fill={`url(#gs${idx})`} strokeWidth={2} name="Sales" /></AreaChart>
           </ResponsiveContainer>
         </div>
       </div>
@@ -405,19 +532,21 @@ function TVAgent({ agent, idx, company, aprilBackfill = {} }) {
   );
 }
 
-function TVCompany({ company, agents, aprilBackfill = {} }) {
-  const total = getTotalQ2Collection(agents, aprilBackfill);
-  const pipeline = calcPipeline(agents, aprilBackfill);
-  const q2Pct = pct(total, company.q2Target);
-  const pipeData = Q2_ALL_MONTHS.map(m => ({ name: MONTH_NAMES[m], ...(pipeline[MONTH_NAMES[m].toLowerCase()] || { leads: 0, sales: 0, ratio: 0 }) }));
-  const qData = [{ name: "Q1", target: company.q1Target, done: company.q1Done }, { name: "Q2", target: company.q2Target, done: total }, { name: "Q3", target: company.q3Target, done: company.q3Done }, { name: "Q4", target: company.q4Target, done: company.q4Done }];
+function TVCompany({ company, agents, aprilBackfill = {}, selectedQ = 2 }) {
+  const total = getQuarterTotal(agents, selectedQ, aprilBackfill);
+  const pipeline = calcPipeline(agents, selectedQ, aprilBackfill);
+  const qTarget = getQuarterTarget(company, selectedQ);
+  const qPctVal = pct(total, qTarget);
+  const qMonths = getQuarterMonths(selectedQ);
+  const pipeData = qMonths.map(m => ({ name: MONTH_NAMES[m], ...(pipeline[MONTH_NAMES[m].toLowerCase()] || { leads: 0, sales: 0, ratio: 0 }) }));
+  const qData = [1,2,3,4].map(q => ({ name: `Q${q}`, target: getQuarterTarget(company, q), done: q === 2 ? total : getQuarterDone(company, q) }));
   return (
     <div style={{ width: "100%", maxWidth: 1600 }}>
       <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 24, textAlign: "center", color: C.accent }}>🏢 Company Performance Overview</h2>
       <div style={{ ...ST.grid(4), marginBottom: 24 }}>
         <SCard title="Q1 Result" value={`${fmt(company.q1Done)} QAR`} sub={`Target: ${fmt(company.q1Target)}`} icon="📅" color={C.purple} />
         <SCard title="Q2 Target" value={`${fmt(company.q2Target)} QAR`} sub={`Done: ${fmt(total)} QAR`} icon="📅" color={C.accent} />
-        <SCard title="Q2 Progress" value={`${q2Pct}%`} icon="⚡" color={q2Pct >= 50 ? C.success : C.warning} />
+        <SCard title={`Q${selectedQ} Progress`} value={`${qPctVal}%`} icon="⚡" color={qPctVal >= 50 ? C.success : C.warning} />
         <SCard title="Team Collection" value={`${fmt(total)} QAR`} sub={`${agents.filter(a => getMonthlyCollection(a) > 0).length} of ${agents.length} active`} icon="👥" color={C.gold} />
       </div>
       <div style={ST.grid(2)}>
@@ -439,7 +568,7 @@ function TVWeekly({ agents }) {
     <div style={{ width: "100%", maxWidth: 1600, overflow: "auto" }}>
       <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, textAlign: "center", color: C.accent }}>📅 Weekly Collections Breakdown</h2>
       <table style={ST.table}>
-        <thead><tr><th style={ST.th}>Agent</th>{THURSDAY_LABELS.map(w => <th key={w} style={{ ...ST.th, textAlign: "right" }}>{w}</th>)}<th style={{ ...ST.th, textAlign: "right" }}>Total</th></tr></thead>
+        <thead><tr><th style={ST.th}>Agent</th>{LEGACY_LABELS.map(w => <th key={w} style={{ ...ST.th, textAlign: "right" }}>{w}</th>)}<th style={{ ...ST.th, textAlign: "right" }}>Total</th></tr></thead>
         <tbody>{sorted.map((a, i) => {
           const total = getMonthlyCollection(a); const c = tri(i);
           return (<tr key={a.id}><td style={{ ...ST.td, borderRadius: "8px 0 0 8px", fontWeight: 600, color: "#f1f5f9" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: c, marginRight: 8 }} />{a.name}</td>
@@ -460,14 +589,13 @@ const DEFAULT_SLIDE_DEFS = [
   { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000 },
 ];
 
-function buildSlideList(agents, company, aprilBackfill, tvSettings) {
+function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 2) {
   const tvAgents = agents.filter(a => !a.hideFromTV);
   const sorted = [...tvAgents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
   const activeAgents = sorted.filter(a => getMonthlyCollection(a) > 0);
 
-  // Build all possible slides
   const allSlides = [
-    { id: "company", name: "Company overview", icon: "🏢", type: "fixed", defaultDur: 20000, comp: <TVCompany company={company} agents={tvAgents} aprilBackfill={aprilBackfill} /> },
+    { id: "company", name: "Company overview", icon: "🏢", type: "fixed", defaultDur: 20000, comp: <TVCompany company={company} agents={tvAgents} aprilBackfill={aprilBackfill} selectedQ={selectedQ} /> },
     { id: "allAgents", name: "All agents", icon: "👥", type: "fixed", defaultDur: 15000, comp: <TVAll agents={tvAgents} /> },
     { id: "weekly", name: "Weekly breakdown", icon: "📅", type: "fixed", defaultDur: 15000, comp: <TVWeekly agents={tvAgents} /> },
     ...activeAgents.map((a, i) => ({ id: `agent_${a.id}`, name: a.name, icon: "", image: a.image, type: "agent", defaultDur: 10000, comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} /> })),
@@ -502,25 +630,24 @@ function buildSlideList(agents, company, aprilBackfill, tvSettings) {
 
 // ─── TV PODIUM (Top 3 Leaderboard) ─────────────────────────────────
 function TVPodium({ agents }) {
-  const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
+  const sorted = [...agents].sort((a, b) => getMonthlySales(b) - getMonthlySales(a));
   const top3 = sorted.slice(0, 3);
-  const podiumOrder = top3.length === 3 ? [top3[1], top3[0], top3[2]] : top3; // Silver, Gold, Bronze for visual layout
+  const podiumOrder = top3.length === 3 ? [top3[1], top3[0], top3[2]] : top3;
   const medals = { 0: { emoji: "🥈", label: "2nd Place", color: "#94a3b8", height: 140 }, 1: { emoji: "🥇", label: "1st Place", color: C.gold, height: 180 }, 2: { emoji: "🥉", label: "3rd Place", color: "#cd7f32", height: 110 } };
   const podiumColors = top3.length === 3 ? [medals[0], medals[1], medals[2]] : top3.map((_, i) => medals[i]);
 
   return (
     <div style={{ width: "100%", maxWidth: 1200, textAlign: "center" }}>
       <h2 style={{ fontSize: 32, fontWeight: 800, marginBottom: 8, color: C.gold }}>🏆 Top Performers</h2>
-      <p style={{ fontSize: 14, color: C.textDim, marginBottom: 40 }}>Monthly Collection Leaderboard</p>
+      <p style={{ fontSize: 14, color: C.textDim, marginBottom: 40 }}>Monthly Sales Leaderboard</p>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 24 }}>
         {podiumOrder.map((agent, vi) => {
           const pc = podiumColors[vi];
+          const salesCount = getMonthlySales(agent);
           const col = getMonthlyCollection(agent);
-          const p = pct(col, agent.target);
           const isFirst = vi === 1;
           return (
             <div key={agent.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", width: isFirst ? 280 : 220 }}>
-              {/* Agent info */}
               <div style={{ fontSize: isFirst ? 48 : 36, marginBottom: 8, filter: isFirst ? "drop-shadow(0 0 12px rgba(251,191,36,0.5))" : "none" }}>{pc.emoji}</div>
               <div style={{ position: "relative", marginBottom: 12 }}>
                 {agent.image ? (
@@ -530,9 +657,8 @@ function TVPodium({ agents }) {
                 )}
               </div>
               <div style={{ fontSize: isFirst ? 22 : 17, fontWeight: 800, color: "#f1f5f9", marginBottom: 4 }}>{agent.name}</div>
-              <div style={{ fontSize: isFirst ? 24 : 18, fontWeight: 800, color: pc.color, marginBottom: 4 }}>{fmt(col)} QAR</div>
-              <div style={{ fontSize: 12, color: C.textDim, marginBottom: 12 }}>{p}% of target</div>
-              {/* Podium block */}
+              <div style={{ fontSize: isFirst ? 24 : 18, fontWeight: 800, color: C.success, marginBottom: 2 }}>{fmt(salesCount)} sales</div>
+              <div style={{ fontSize: 12, color: C.textDim, marginBottom: 12 }}>{fmt(col)} QAR collected</div>
               <div style={{
                 width: "100%", height: pc.height, borderRadius: "12px 12px 0 0",
                 background: `linear-gradient(180deg, ${pc.color}30 0%, ${pc.color}10 100%)`,
@@ -546,18 +672,17 @@ function TVPodium({ agents }) {
           );
         })}
       </div>
-      {/* Honorable mentions: 4th and 5th */}
       {sorted.length > 3 && (
         <div style={{ marginTop: 32, display: "flex", justifyContent: "center", gap: 32 }}>
           {sorted.slice(3, 5).map((a, i) => {
-            const col = getMonthlyCollection(a);
-            if (col <= 0) return null;
+            const salesCount = getMonthlySales(a);
+            if (salesCount <= 0) return null;
             return (
               <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: `1px solid ${C.border}` }}>
                 <span style={{ fontSize: 16, fontWeight: 800, color: C.textDim }}>{i + 4}.</span>
                 {a.image ? <img src={a.image} alt={a.name} style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover" }} /> : <div style={{ ...ST.av(tri(i)), width: 36, height: 36, fontSize: 13 }}>{initials(a.name)}</div>}
                 <span style={{ fontWeight: 600, fontSize: 14, color: C.text }}>{a.name}</span>
-                <span style={{ fontWeight: 700, fontSize: 14, color: C.accent }}>{fmt(col)} QAR</span>
+                <span style={{ fontWeight: 700, fontSize: 14, color: C.success }}>{fmt(salesCount)} sales</span>
               </div>
             );
           })}
@@ -568,8 +693,8 @@ function TVPodium({ agents }) {
 }
 
 // ─── TV MODE ───────────────────────────────────────────────────────
-function TVMode({ agents, company, logo, onClose, aprilBackfill = {}, tvSettings = null }) {
-  const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings);
+function TVMode({ agents, company, logo, onClose, aprilBackfill = {}, tvSettings = null, selectedQ = 2 }) {
+  const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ);
   const visibleSlides = allSlides.filter(s => s.visible);
   const slides = visibleSlides.map(s => ({ comp: s.comp, dur: s.dur }));
   const [cur, setCur] = useState(0);
@@ -628,7 +753,7 @@ function Login({ onLogin }) {
 // ─── MODAL: WEEKLY LEADS ───────────────────────────────────────────
 function WeeklyLeadsModal({ agents, onSave, onClose }) {
   const [data, setData] = useState(agents.map(a => ({ id: a.id, name: a.name, weeklyLeads: [...(a.weeklyLeads || makeEmptyWeeks())] })));
-  const [wi, setWi] = useState(getCurrentWeekIndex(THURSDAYS));
+  const [wi, setWi] = useState(getCurrentWeekIndex(LEGACY_THURSDAYS));
   const totalLeads = data.reduce((s, d) => s + (d.weeklyLeads[wi] || 0), 0);
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mc} onClick={e => e.stopPropagation()}>
@@ -637,7 +762,7 @@ function WeeklyLeadsModal({ agents, onSave, onClose }) {
       <div style={{ marginBottom: 16 }}>
         <label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Week Ending (Thursday)</label>
         <select style={ST.sel} value={wi} onChange={e => setWi(Number(e.target.value))}>
-          {THURSDAYS.map((t, i) => <option key={i} value={i}>Week ending {formatThursdayFull(t)}</option>)}
+          {LEGACY_THURSDAYS.map((t, i) => <option key={i} value={i}>Week ending {formatThursdayFull(t)}</option>)}
         </select>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -668,7 +793,7 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
     weeklyCollections: [...(a.weeklyCollections || makeEmptyWeeks())],
     weeklySales: (a.weeklySales || makeEmptySales()).map(s => ({ ...s })),
   })));
-  const [wi, setWi] = useState(getCurrentWeekIndex(THURSDAYS));
+  const [wi, setWi] = useState(getCurrentWeekIndex(LEGACY_THURSDAYS));
 
   // Previous = last week's Current entry (auto-filled, read-only)
   const getAutoPrev = (agentData, weekIdx) => {
@@ -678,9 +803,9 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
 
   // Get monthly collection total for an agent (sum of all weeks in the same month as selected week)
   const getMonthlyTotal = (agentData) => {
-    const selectedMonth = THURSDAYS[wi].getMonth();
+    const selectedMonth = LEGACY_THURSDAYS[wi].getMonth();
     let total = 0;
-    THURSDAYS.forEach((t, i) => {
+    LEGACY_THURSDAYS.forEach((t, i) => {
       if (t.getMonth() === selectedMonth) {
         total += agentData.weeklyCollections[i] || 0;
       }
@@ -722,18 +847,18 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
   }, 0);
 
   // Dynamic column headers
-  const prevHeader = getPrevWeekLabel(wi, THURSDAYS);
-  const weekSalesHeader = getWeekSalesLabel(wi, THURSDAYS);
-  const selectedMonthName = MONTH_NAMES[THURSDAYS[wi].getMonth()];
+  const prevHeader = getPrevWeekLabel(wi, LEGACY_THURSDAYS);
+  const weekSalesHeader = getWeekSalesLabel(wi, LEGACY_THURSDAYS);
+  const selectedMonthName = MONTH_NAMES[LEGACY_THURSDAYS[wi].getMonth()];
 
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mcWide} onClick={e => e.stopPropagation()}>
       <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>💰 Update Weekly Collection & Sales</h3>
-      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Finance Department &nbsp;|&nbsp; Week ending: <span style={{ color: C.accent, fontWeight: 600 }}>{formatThursdayFull(THURSDAYS[wi])}</span></p>
+      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Finance Department &nbsp;|&nbsp; Week ending: <span style={{ color: C.accent, fontWeight: 600 }}>{formatThursdayFull(LEGACY_THURSDAYS[wi])}</span></p>
       <div style={{ marginBottom: 16 }}>
         <label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Week Ending (Thursday)</label>
         <select style={ST.sel} value={wi} onChange={e => setWi(Number(e.target.value))}>
-          {THURSDAYS.map((t, i) => <option key={i} value={i}>Week ending {formatThursdayFull(t)}</option>)}
+          {LEGACY_THURSDAYS.map((t, i) => <option key={i} value={i}>Week ending {formatThursdayFull(t)}</option>)}
         </select>
       </div>
 
@@ -802,9 +927,10 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
 }
 
 // ─── MODAL: PIPELINE (read-only, auto-calculated) ──────────────────
-function PipelineViewModal({ agents, aprilBackfill = {}, onClose }) {
-  const pipeline = calcPipeline(agents, aprilBackfill);
-  const months = Q2_ALL_MONTHS.map(m => ({ key: MONTH_NAMES[m].toLowerCase(), label: `${MONTH_NAMES[m]} ${YEAR}` }));
+function PipelineViewModal({ agents, aprilBackfill = {}, selectedQ = 2, onClose }) {
+  const pipeline = calcPipeline(agents, selectedQ, aprilBackfill);
+  const qMonths = getQuarterMonths(selectedQ);
+  const months = qMonths.map(m => ({ key: MONTH_NAMES[m].toLowerCase(), label: `${MONTH_NAMES[m]} ${YEAR}` }));
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mc} onClick={e => e.stopPropagation()}>
       <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>📊 Company Lead Pipeline</h3>
@@ -820,6 +946,73 @@ function PipelineViewModal({ agents, aprilBackfill = {}, onClose }) {
         </div>
       ))}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}><button style={ST.btn()} onClick={onClose}>Close</button></div>
+    </div></div>
+  );
+}
+
+// ─── MODAL: MONTHLY INPUT ──────────────────────────────────────────
+function MonthlyInputModal({ agents, monthIdx, monthlyData, aprilBackfill, onSave, onClose }) {
+  const monthName = MONTH_NAMES[monthIdx];
+  const [data, setData] = useState(() => {
+    const d = {};
+    agents.forEach(a => {
+      const existing = getAgentMonthData(a, monthIdx, aprilBackfill, monthlyData);
+      d[a.id] = { collections: existing.collections, sales: existing.sales, leads: existing.leads };
+    });
+    return d;
+  });
+
+  const updateField = (id, field, val) => {
+    setData(prev => ({ ...prev, [id]: { ...prev[id], [field]: Number(val) || 0 } }));
+  };
+
+  const totalCol = Object.values(data).reduce((s, d) => s + (d.collections || 0), 0);
+  const totalSales = Object.values(data).reduce((s, d) => s + (d.sales || 0), 0);
+  const totalLeads = Object.values(data).reduce((s, d) => s + (d.leads || 0), 0);
+
+  const handleSave = () => {
+    const mKey = `m${monthIdx}`;
+    const updated = { ...monthlyData, [mKey]: data };
+    onSave(updated);
+  };
+
+  return (
+    <div style={ST.modal} onClick={onClose}><div style={ST.mcWide} onClick={e => e.stopPropagation()}>
+      <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>📅 {monthName} {YEAR} — Monthly Data Entry</h3>
+      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 4px" }}>Enter each agent's {monthName} totals for collections, sales, and leads.</p>
+      <p style={{ fontSize: 11, color: C.warning, margin: "0 0 16px" }}>⚠️ Monthly entry overrides weekly data for this month. Use weekly input if you prefer week-by-week tracking.</p>
+
+      <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
+        <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600 }}>Agent</div>
+        <div style={{ fontSize: 10, color: C.gold, fontWeight: 600, textAlign: "center" }}>Collections (QAR)</div>
+        <div style={{ fontSize: 10, color: C.success, fontWeight: 600, textAlign: "center" }}>Sales (Count)</div>
+        <div style={{ fontSize: 10, color: C.purple, fontWeight: 600, textAlign: "center" }}>Leads (Count)</div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: "50vh", overflowY: "auto" }}>
+        {agents.map(a => (
+          <div key={a.id} style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 1fr", gap: 6, alignItems: "center" }}>
+            <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{a.name}</span>
+            <input type="number" style={ST.inputSm} value={data[a.id]?.collections || ""} placeholder="0"
+              onChange={e => updateField(a.id, "collections", e.target.value)} />
+            <input type="number" style={ST.inputSm} value={data[a.id]?.sales || ""} placeholder="0"
+              onChange={e => updateField(a.id, "sales", e.target.value)} />
+            <input type="number" style={ST.inputSm} value={data[a.id]?.leads || ""} placeholder="0"
+              onChange={e => updateField(a.id, "leads", e.target.value)} />
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 16, padding: "14px 16px", background: C.cardAlt, borderRadius: 10, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, textAlign: "center" }}>
+        <div><div style={{ fontSize: 18, fontWeight: 800, color: C.gold }}>{fmt(totalCol)}</div><div style={{ fontSize: 10, color: C.textDim }}>Total Collections</div></div>
+        <div><div style={{ fontSize: 18, fontWeight: 800, color: C.success }}>{totalSales}</div><div style={{ fontSize: 10, color: C.textDim }}>Total Sales</div></div>
+        <div><div style={{ fontSize: 18, fontWeight: 800, color: C.purple }}>{totalLeads}</div><div style={{ fontSize: 10, color: C.textDim }}>Total Leads</div></div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+        <button style={ST.btnO} onClick={onClose}>Cancel</button>
+        <button style={ST.btn()} onClick={handleSave}>Save</button>
+      </div>
     </div></div>
   );
 }
@@ -996,6 +1189,10 @@ export default function SalesDashboard() {
   const [aprilBackfill, setAprilBackfill] = useState({});
   const [tvSettings, setTvSettings] = useState(null);
   const [previewSlide, setPreviewSlide] = useState(null);
+  const [selectedQ, setSelectedQ] = useState(getCurrentQuarterNum());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth()); // 0-indexed current month
+  const [tableView, setTableView] = useState("collections");
+  const [monthlyData, setMonthlyData] = useState({});
   const logoRef = useRef(null);
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => { setLoggedIn(!!u); setAuthLoading(false); }); return () => u(); }, []);
@@ -1041,6 +1238,9 @@ export default function SalesDashboard() {
       onSnapshot(doc(db, "dashboard", "tvSettings"), (snap) => {
         if (snap.exists()) setTvSettings(snap.data());
       }),
+      onSnapshot(doc(db, "dashboard", "monthlyData"), (snap) => {
+        if (snap.exists()) setMonthlyData(snap.data());
+      }),
     ];
     return () => unsubs.forEach(u => u());
   }, [loggedIn]);
@@ -1080,6 +1280,13 @@ export default function SalesDashboard() {
     setTvSettings(data);
     setSaving(true);
     try { await setDoc(doc(db, "dashboard", "tvSettings"), data); console.log("TV settings saved"); } catch(e) { console.error("Save TV settings error:", e); alert("Failed to save TV settings."); }
+    setSaving(false);
+  };
+
+  const saveMonthlyData = async (data) => {
+    setMonthlyData(data);
+    setSaving(true);
+    try { await setDoc(doc(db, "dashboard", "monthlyData"), data); console.log("Monthly data saved"); } catch(e) { console.error("Save monthly data error:", e); alert("Failed to save monthly data."); }
     setSaving(false);
   };
 
@@ -1135,14 +1342,18 @@ export default function SalesDashboard() {
   // FIX: Show loading while Firestore data is being fetched (after login)
   if (!dataLoaded) return (<div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ textAlign: "center" }}><div style={{ width: 60, height: 60, borderRadius: 14, background: `linear-gradient(135deg, ${C.accent}, #6366f1)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: "#fff", marginBottom: 16 }}>S</div><div style={{ color: C.textDim, fontSize: 14 }}>Loading dashboard data...</div></div></div>);
 
-  const totalCol = getTotalQ2Collection(agents, aprilBackfill);
-  const q2Pct = pct(totalCol, company.q2Target);
-  const pipeline = calcPipeline(agents, aprilBackfill);
+  const qTarget = getQuarterTarget(company, selectedQ);
+  const totalCol = getQuarterTotal(agents, selectedQ, aprilBackfill);
+  const qPct = pct(totalCol, qTarget);
+  const pipeline = calcPipeline(agents, selectedQ, aprilBackfill);
+  const qMonths = getQuarterMonths(selectedQ);
+  const qThursdays = selectedQ === 2 ? LEGACY_THURSDAYS : getQThursdays(YEAR, selectedQ);
+  const qThursdayLabels = qThursdays.map(formatThursday);
   const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
   const today = new Date();
   const dateStr = today.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} tvSettings={tvSettings} />;
+  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} tvSettings={tvSettings} selectedQ={selectedQ} />;
 
   // ─── TV EDITS PAGE ────────────────────────────────────────────────
   const TVEdits = () => {
@@ -1333,8 +1544,8 @@ export default function SalesDashboard() {
   };
 
   const Dash = () => {
-    // This Week calculations
-    const currentWi = getCurrentWeekIndex(THURSDAYS);
+    // This Week calculations (only for Q2 since that's where weekly data lives)
+    const currentWi = getCurrentWeekIndex(LEGACY_THURSDAYS);
     const prevWi = currentWi > 0 ? currentWi - 1 : null;
     const thisWeekCol = agents.reduce((s, a) => s + ((a.weeklyCollections || [])[currentWi] || 0), 0);
     const prevWeekCol = prevWi !== null ? agents.reduce((s, a) => s + ((a.weeklyCollections || [])[prevWi] || 0), 0) : 0;
@@ -1347,16 +1558,59 @@ export default function SalesDashboard() {
     const leadsTrend = trend(thisWeekLeads, prevWeekLeads);
     const salesTrend = trend(thisWeekSales, prevWeekSales);
 
+    const isQ2 = selectedQ === 2;
+    const hasWeeklyData = isQ2;
+    const currentMonth = new Date().getMonth();
+    const isCurrentMonth = selectedMonth === currentMonth;
+
+    // Get month-specific data for each agent
+    const agentMonthData = agents.map(a => {
+      const md = getAgentMonthData(a, selectedMonth, aprilBackfill, monthlyData);
+      return { ...a, monthCol: md.collections, monthSales: md.sales, monthLeads: md.leads, monthSource: md.source };
+    });
+    const sortedByMonth = [...agentMonthData].sort((a, b) => b.monthCol - a.monthCol);
+
+    // Month Thursdays for weekly table
+    const monthThursdays = getMonthThursdays(selectedMonth);
+    const hasMonthWeekly = monthThursdays.indices.length > 0 && isQ2 && selectedMonth !== 3; // April has no weekly data
+
     return (
     <div style={ST.page}>
-      <div style={{ fontSize: 13, color: C.textDim, marginBottom: 12 }}>📅 Today: <span style={{ color: C.accent, fontWeight: 600 }}>{dateStr}</span> &nbsp;|&nbsp; Q{QUARTER} {YEAR} &nbsp;|&nbsp; {NUM_WEEKS} weeks in quarter</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+        <div style={{ fontSize: 13, color: C.textDim }}>📅 Today: <span style={{ color: C.accent, fontWeight: 600 }}>{dateStr}</span> &nbsp;|&nbsp; Q{selectedQ} {YEAR}</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Month Selector */}
+          <div style={{ display: "flex", gap: 2, background: C.cardAlt, borderRadius: 8, padding: 2, border: `1px solid ${C.border}` }}>
+            {qMonths.map(m => (
+              <button key={m} onClick={() => setSelectedMonth(m)} style={{
+                padding: "5px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "Arial",
+                background: selectedMonth === m ? C.success : "transparent",
+                color: selectedMonth === m ? "#000" : C.textDim,
+                transition: "all 0.2s ease",
+              }}>{MONTH_NAMES[m]}</button>
+            ))}
+          </div>
+          {/* Quarter Selector */}
+          <div style={{ display: "flex", gap: 2, background: C.cardAlt, borderRadius: 8, padding: 2, border: `1px solid ${C.border}` }}>
+            {[1, 2, 3, 4].map(q => (
+              <button key={q} onClick={() => { setSelectedQ(q); setSelectedMonth(getQuarterMonths(q)[0]); }} style={{
+                padding: "5px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "Arial",
+                background: selectedQ === q ? C.accent : "transparent",
+                color: selectedQ === q ? "#000" : C.textDim,
+                transition: "all 0.2s ease",
+              }}>Q{q}</button>
+            ))}
+          </div>
+        </div>
+      </div>
 
-      {/* This Week Summary */}
+      {/* This Week Summary — only show for current month with weekly data */}
+      {isQ2 && isCurrentMonth && hasMonthWeekly && (
       <div style={{ ...ST.card, marginBottom: 20, background: `linear-gradient(135deg, ${C.card} 0%, #1a1a3e 100%)`, border: `1px solid ${C.accent}30` }}>
         <div style={ST.glow} />
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <div style={ST.title}>⚡ This Week — W/E {formatThursday(THURSDAYS[currentWi])}</div>
-          {prevWi !== null && <div style={{ fontSize: 11, color: C.textDim }}>vs previous week (W/E {formatThursday(THURSDAYS[prevWi])})</div>}
+          <div style={ST.title}>⚡ This Week — W/E {formatThursday(LEGACY_THURSDAYS[currentWi])}</div>
+          {prevWi !== null && <div style={{ fontSize: 11, color: C.textDim }}>vs previous week (W/E {formatThursday(LEGACY_THURSDAYS[prevWi])})</div>}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -1385,26 +1639,45 @@ export default function SalesDashboard() {
           </div>
         </div>
       </div>
+      )}
+
+      {/* Not Q2 notice */}
+      {!isQ2 && (
+        <div style={{ ...ST.card, marginBottom: 20, textAlign: "center", padding: 30, border: `1px solid ${C.warning}30` }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.warning, marginBottom: 8 }}>📊 Q{selectedQ} — {MONTH_NAMES[qMonths[0]]} to {MONTH_NAMES[qMonths[2]]} {YEAR}</div>
+          <div style={{ fontSize: 13, color: C.textDim }}>Data entry for Q{selectedQ} will be available in the next update. Currently showing quarterly targets only.</div>
+        </div>
+      )}
+
+      {/* Month indicator */}
+      {isQ2 && (
+        <div style={{ marginBottom: 16, padding: "10px 16px", borderRadius: 10, background: `${C.success}10`, border: `1px solid ${C.success}30`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.success }}>📅 {MONTH_NAMES[selectedMonth]} {YEAR} {selectedMonth === 3 ? "(Monthly data)" : "(Weekly data)"}</div>
+          <div style={{ fontSize: 12, color: C.textDim }}>
+            {(() => { const total = sortedByMonth.reduce((s, a) => s + a.monthCol, 0); const totalS = sortedByMonth.reduce((s, a) => s + a.monthSales, 0); return `${fmt(total)} QAR collected · ${fmt(totalS)} sales`; })()}
+          </div>
+        </div>
+      )}
 
       <div style={{ ...ST.grid(4), marginBottom: 20 }}>
-        <SCard title="Q1 Result" value={fmt(company.q1Done)} sub={`Target: ${fmt(company.q1Target)} (${pct(company.q1Done, company.q1Target)}%)`} icon="📅" color={C.purple} />
-        <SCard title="Q2 Target" value={fmt(company.q2Target)} sub="QAR" icon="📅" color={C.accent} />
-        <SCard title="Q2 Collection" value={fmt(totalCol)} sub={`${q2Pct}% of target`} icon="💰" color={C.gold} />
-        <SCard title="Agents" value={agents.length} sub={`${agents.filter(a => getMonthlyCollection(a) > 0).length} active`} icon="👥" color={C.pink} />
+        <SCard title={`Q${selectedQ} Target`} value={fmt(qTarget)} sub="QAR" icon="📅" color={C.accent} />
+        <SCard title={`Q${selectedQ} Collection`} value={fmt(totalCol)} sub={`${qPct}% of target`} icon="💰" color={C.gold} />
+        <SCard title={`${MONTH_NAMES[selectedMonth]} Collection`} value={fmt(sortedByMonth.reduce((s, a) => s + a.monthCol, 0))} sub={`${MONTH_NAMES[selectedMonth]} total`} icon="📊" color={C.success} />
+        <SCard title={`${MONTH_NAMES[selectedMonth]} Sales`} value={fmt(sortedByMonth.reduce((s, a) => s + a.monthSales, 0))} sub="count" icon="📈" color={C.pink} />
       </div>
       <div style={{ ...ST.grid(2), marginBottom: 20 }}>
         <div style={ST.card}>
-          <div style={{ ...ST.title, justifyContent: "space-between" }}><span>🏆 Agent Monthly Collections</span><span style={{ fontSize: 11, color: C.textDim }}>Target: QAR 40,000</span></div>
-          <div style={{ maxHeight: 520, overflowY: "auto" }}>{sorted.map((a, i) => <AgentBar key={a.id} agent={a} idx={i} />)}</div>
+          <div style={{ ...ST.title, justifyContent: "space-between" }}><span>🏆 Agent Performance — {MONTH_NAMES[selectedMonth]}</span><span style={{ fontSize: 11, color: C.textDim }}>Target: QAR 40,000/month</span></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, maxHeight: 600, overflowY: "auto" }}>{sortedByMonth.map((a, i) => <AgentCard key={a.id} agent={{ ...a, _monthCol: a.monthCol, _monthSales: a.monthSales, _monthLeads: a.monthLeads }} idx={i} aprilBackfill={aprilBackfill} selectedMonth={selectedMonth} monthlyData={monthlyData} />)}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={ST.card}><div style={ST.title}>📊 Quarterly Performance</div>
-            <ResponsiveContainer width="100%" height={220}><BarChart data={[{ name: "Q1", target: company.q1Target, done: company.q1Done }, { name: "Q2", target: company.q2Target, done: totalCol }, { name: "Q3", target: company.q3Target, done: company.q3Done }, { name: "Q4", target: company.q4Target, done: company.q4Done }]}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="name" stroke={C.textDim} fontSize={12} /><YAxis stroke={C.textDim} fontSize={11} tickFormatter={v => `${(v/1000).toFixed(0)}k`} /><Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={v => `${fmt(v)} QAR`} /><Legend /><Bar dataKey="target" fill="#334155" name="Target" radius={[4,4,0,0]} /><Bar dataKey="done" fill={C.accent} name="Collected" radius={[4,4,0,0]} /></BarChart></ResponsiveContainer>
+            <ResponsiveContainer width="100%" height={220}><BarChart data={[1,2,3,4].map(q => ({ name: `Q${q}`, target: getQuarterTarget(company, q), done: q === 2 ? totalCol : getQuarterDone(company, q) }))}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="name" stroke={C.textDim} fontSize={12} /><YAxis stroke={C.textDim} fontSize={11} tickFormatter={v => `${(v/1000).toFixed(0)}k`} /><Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={v => `${fmt(v)} QAR`} /><Legend /><Bar dataKey="target" fill="#334155" name="Target" radius={[4,4,0,0]} /><Bar dataKey="done" fill={C.accent} name="Collected" radius={[4,4,0,0]} /></BarChart></ResponsiveContainer>
           </div>
           <div style={ST.card}>
-            <div style={ST.title}>🔄 Lead Pipeline (Auto-calculated)</div>
+            <div style={ST.title}>🔄 Q{selectedQ} Pipeline ({MONTH_NAMES[qMonths[0]]}–{MONTH_NAMES[qMonths[2]]})</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-              {Q2_ALL_MONTHS.map(m => { const key = MONTH_NAMES[m].toLowerCase(); const d = pipeline[key] || { leads: 0, sales: 0, ratio: 0 }; return (
+              {qMonths.map(m => { const key = MONTH_NAMES[m].toLowerCase(); const d = pipeline[key] || { leads: 0, sales: 0, ratio: 0 }; return (
                 <div key={m} style={{ background: C.cardAlt, borderRadius: 10, padding: 14, textAlign: "center" }}>
                   <div style={{ fontSize: 12, color: C.textDim, marginBottom: 6 }}>{MONTH_NAMES[m]}</div>
                   <div style={{ fontSize: 20, fontWeight: 800, color: C.accent }}>{fmt(d.leads)}</div><div style={{ fontSize: 11, color: C.textDim }}>leads</div>
@@ -1416,20 +1689,91 @@ export default function SalesDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Weekly Table — filtered by selected month */}
+      {hasMonthWeekly && (
       <div style={ST.card}>
-        <div style={ST.title}>📅 Weekly Agent Collections (Week ending Thursdays)</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={ST.title}>📅 {MONTH_NAMES[selectedMonth]} Weekly {tableView === "collections" ? "Collections" : "Sales"}</div>
+          <div style={{ display: "flex", gap: 4, background: C.cardAlt, borderRadius: 8, padding: 2, border: `1px solid ${C.border}` }}>
+            <button onClick={() => setTableView("collections")} style={{
+              padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "Arial",
+              background: tableView === "collections" ? C.accent : "transparent",
+              color: tableView === "collections" ? "#000" : C.textDim,
+            }}>💰 Collections</button>
+            <button onClick={() => setTableView("sales")} style={{
+              padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "Arial",
+              background: tableView === "sales" ? C.success : "transparent",
+              color: tableView === "sales" ? "#000" : C.textDim,
+            }}>📈 Sales</button>
+          </div>
+        </div>
         <div style={{ overflowX: "auto" }}>
           <table style={ST.table}>
-            <thead><tr><th style={ST.th}>Agent</th>{THURSDAY_LABELS.map(w => <th key={w} style={{ ...ST.th, textAlign: "right" }}>{w}</th>)}<th style={{ ...ST.th, textAlign: "right" }}>Total</th></tr></thead>
-            <tbody>{sorted.map((a, i) => {
-              const total = getMonthlyCollection(a); const c = tri(i);
+            <thead><tr><th style={ST.th}>Agent</th>{monthThursdays.labels.map(w => <th key={w} style={{ ...ST.th, textAlign: "right" }}>{w}</th>)}<th style={{ ...ST.th, textAlign: "right" }}>{MONTH_NAMES[selectedMonth]} Total</th></tr></thead>
+            <tbody>{sortedByMonth.map((a, i) => {
+              const c = tri(i);
+              let monthTotal = 0;
               return (<tr key={a.id}><td style={{ ...ST.td, borderRadius: "8px 0 0 8px", fontWeight: 600, color: "#f1f5f9" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: c, marginRight: 8 }} />{a.name}</td>
-                {(a.weeklyCollections||[]).map((v, j) => <td key={j} style={{ ...ST.td, textAlign: "right" }}>{v > 0 ? fmt(v) : <span style={{ color: C.textDim }}>—</span>}</td>)}
-                <td style={{ ...ST.td, borderRadius: "0 8px 8px 0", textAlign: "right", fontWeight: 700, color: c }}>{fmt(total)}</td></tr>);
+                {monthThursdays.indices.map(j => {
+                  const v = tableView === "collections" ? ((a.weeklyCollections||[])[j]||0) : (((a.weeklySales||[])[j]||{}).total||0);
+                  monthTotal += v;
+                  return <td key={j} style={{ ...ST.td, textAlign: "right" }}>{v > 0 ? fmt(v) : <span style={{ color: C.textDim }}>—</span>}</td>;
+                })}
+                <td style={{ ...ST.td, borderRadius: "0 8px 8px 0", textAlign: "right", fontWeight: 700, color: c }}>{fmt(monthTotal)}</td></tr>);
             })}</tbody>
           </table>
         </div>
       </div>
+      )}
+
+      {/* Quarterly Summary Table */}
+      {isQ2 && (
+      <div style={{ ...ST.card, marginTop: 16 }}>
+        <div style={ST.title}>📊 Q2 Quarterly Summary (Apr–Jun)</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={ST.table}>
+            <thead>
+              <tr>
+                <th style={ST.th}>Agent</th>
+                <th style={{ ...ST.th, textAlign: "right", color: C.gold }}>Apr Coll</th>
+                <th style={{ ...ST.th, textAlign: "right", color: C.success }}>Apr Sales</th>
+                <th style={{ ...ST.th, textAlign: "right", color: C.gold }}>May Coll</th>
+                <th style={{ ...ST.th, textAlign: "right", color: C.success }}>May Sales</th>
+                <th style={{ ...ST.th, textAlign: "right", color: C.gold }}>Jun Coll</th>
+                <th style={{ ...ST.th, textAlign: "right", color: C.success }}>Jun Sales</th>
+                <th style={{ ...ST.th, textAlign: "right", color: C.accent }}>Q2 Coll</th>
+                <th style={{ ...ST.th, textAlign: "right", color: C.accent }}>Q2 Sales</th>
+              </tr>
+            </thead>
+            <tbody>{sorted.map((a, i) => {
+              const mbC = getMonthBreakdown(a, "collections");
+              const mbS = getMonthBreakdown(a, "sales");
+              const aprilBf = aprilBackfill[a.id] || {};
+              const aprC = aprilBf.collections || 0;
+              const aprS = aprilBf.sales || 0;
+              const mayC = mbC[4] || 0;
+              const mayS = mbS[4] || 0;
+              const junC = mbC[5] || 0;
+              const junS = mbS[5] || 0;
+              const totC = aprC + mayC + junC;
+              const totS = aprS + mayS + junS;
+              return (<tr key={a.id}>
+                <td style={{ ...ST.td, borderRadius: "8px 0 0 8px", fontWeight: 600, color: "#f1f5f9" }}>{a.name}</td>
+                <td style={{ ...ST.td, textAlign: "right" }}>{aprC > 0 ? fmt(aprC) : <span style={{ color: C.textDim }}>—</span>}</td>
+                <td style={{ ...ST.td, textAlign: "right" }}>{aprS > 0 ? fmt(aprS) : <span style={{ color: C.textDim }}>—</span>}</td>
+                <td style={{ ...ST.td, textAlign: "right" }}>{mayC > 0 ? fmt(mayC) : <span style={{ color: C.textDim }}>—</span>}</td>
+                <td style={{ ...ST.td, textAlign: "right" }}>{mayS > 0 ? fmt(mayS) : <span style={{ color: C.textDim }}>—</span>}</td>
+                <td style={{ ...ST.td, textAlign: "right" }}>{junC > 0 ? fmt(junC) : <span style={{ color: C.textDim }}>—</span>}</td>
+                <td style={{ ...ST.td, textAlign: "right" }}>{junS > 0 ? fmt(junS) : <span style={{ color: C.textDim }}>—</span>}</td>
+                <td style={{ ...ST.td, textAlign: "right", fontWeight: 700, color: C.accent }}>{fmt(totC)}</td>
+                <td style={{ ...ST.td, borderRadius: "0 8px 8px 0", textAlign: "right", fontWeight: 700, color: C.accent }}>{fmt(totS)}</td>
+              </tr>);
+            })}</tbody>
+          </table>
+        </div>
+      </div>
+      )}
     </div>
     );
   };
@@ -1463,6 +1807,7 @@ export default function SalesDashboard() {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <button style={{ ...ST.btn(C.accent), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "leads" })}>📋 Weekly Update Leads (Fadwa & Lucy)</button>
               <button style={{ ...ST.btn(C.purple), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "collsales" })}>💰 Weekly Update Collection & Sales (Finance)</button>
+              <button style={{ ...ST.btn(C.gold), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "monthlyInput" })}>📅 Monthly Data Entry</button>
               <button style={{ ...ST.btn(C.warning), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "aprilBackfill" })}>📅 April Backfill Data</button>
               <button style={{ ...ST.btn(C.success), width: "100%", textAlign: "center" }} onClick={() => setModal({ type: "pipeline" })}>📊 View Company Lead Pipeline</button>
             </div>
@@ -1510,8 +1855,9 @@ export default function SalesDashboard() {
       {page === "dashboard" ? <Dash /> : page === "tvEdits" ? <TVEdits /> : <Settings />}
       {modal?.type === "leads" && <WeeklyLeadsModal agents={agents} onSave={handleWeeklyLeadsSave} onClose={() => setModal(null)} />}
       {modal?.type === "collsales" && <WeeklyCollSalesModal agents={agents} onSave={handleCollSalesSave} onClose={() => setModal(null)} />}
-      {modal?.type === "pipeline" && <PipelineViewModal agents={agents} aprilBackfill={aprilBackfill} onClose={() => setModal(null)} />}
+      {modal?.type === "pipeline" && <PipelineViewModal agents={agents} aprilBackfill={aprilBackfill} selectedQ={selectedQ} onClose={() => setModal(null)} />}
       {modal?.type === "aprilBackfill" && <AprilBackfillModal agents={agents} aprilBackfill={aprilBackfill} onSave={(data) => { saveAprilBackfill(data); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === "monthlyInput" && <MonthlyInputModal agents={agents} monthIdx={selectedMonth} monthlyData={monthlyData} aprilBackfill={aprilBackfill} onSave={(data) => { saveMonthlyData(data); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === "agent" && <AgentModal agent={modal.agent} onSave={handleAgentSave} onClose={() => setModal(null)} />}
       {/* Preview single slide */}
       {previewSlide && (
