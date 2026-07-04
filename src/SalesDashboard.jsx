@@ -1268,8 +1268,9 @@ export default function SalesDashboard() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth()); // 0-indexed current month
   const [tableView, setTableView] = useState("collections");
   const [monthlyData, setMonthlyData] = useState({});
-  const [tvDisplayQ, setTvDisplayQ] = useState(2); // Which quarter to show on TV
-  const [tvDisplayMonth, setTvDisplayMonth] = useState(5); // Which month to show on TV (default June = 5)
+  const [tvDisplayQ, setTvDisplayQ] = useState(2);
+  const [tvDisplayMonth, setTvDisplayMonth] = useState(5);
+  const [dragAgent, setDragAgent] = useState(null);
   const logoRef = useRef(null);
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => { setLoggedIn(!!u); setAuthLoading(false); }); return () => u(); }, []);
@@ -1896,9 +1897,18 @@ export default function SalesDashboard() {
       {saving && <div style={{ position: "fixed", top: 60, right: 24, padding: "8px 16px", borderRadius: 8, background: C.accent, color: "#000", fontWeight: 600, fontSize: 13, zIndex: 150 }}>💾 Saving to cloud...</div>}
       <div style={{ ...ST.grid(2), marginBottom: 20 }}>
         <div style={ST.card}>
-          <div style={{ ...ST.title, justifyContent: "space-between" }}><span>👥 Agent Management</span><button style={ST.btn()} onClick={() => setModal({ type: "agent" })}>+ Add Agent</button></div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{agents.map((a, i) => (
-            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 8, background: C.cardAlt }}>
+          <div style={{ ...ST.title, justifyContent: "space-between" }}><span>👥 Agent Management</span><div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 11, color: C.textDim, alignSelf: "center" }}>↕ Drag or use arrows to reorder</span><button style={ST.btn()} onClick={() => setModal({ type: "agent" })}>+ Add Agent</button></div></div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{agents.map((a, i) => (
+            <div key={a.id} draggable
+              onDragStart={() => setDragAgent(i)}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => { e.preventDefault(); if (dragAgent !== null && dragAgent !== i) { const n = [...agents]; const [item] = n.splice(dragAgent, 1); n.splice(i, 0, item); saveAgents(n); } setDragAgent(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, background: C.cardAlt, cursor: "grab", border: `1px solid ${dragAgent === i ? C.accent : "transparent"}` }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <button style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 12, color: i === 0 ? C.border : C.textDim, lineHeight: 1 }} onClick={() => { if (i > 0) { const n = [...agents]; [n[i-1], n[i]] = [n[i], n[i-1]]; saveAgents(n); } }} disabled={i === 0}>▲</button>
+                <button style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 12, color: i === agents.length-1 ? C.border : C.textDim, lineHeight: 1 }} onClick={() => { if (i < agents.length-1) { const n = [...agents]; [n[i], n[i+1]] = [n[i+1], n[i]]; saveAgents(n); } }} disabled={i === agents.length-1}>▼</button>
+              </div>
+              <span style={{ fontSize: 11, color: C.textDim, width: 18, textAlign: "center", flexShrink: 0 }}>{i+1}</span>
               {a.image ? <img src={a.image} alt={a.name} style={ST.avImg} /> : <div style={ST.av(tri(i))}>{initials(a.name)}</div>}
               <span style={{ flex: 1, fontWeight: 600, color: C.text }}>{a.name} {a.hideFromTV && <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: `${C.warning}20`, color: C.warning, fontWeight: 600, marginLeft: 4 }}>Hidden from TV</span>}</span>
               <span style={{ fontSize: 13, color: C.textDim }}>{fmt(a.target)} QAR</span>
