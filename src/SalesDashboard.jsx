@@ -1643,6 +1643,20 @@ export default function SalesDashboard() {
           })}
         </div>
 
+        {/* TV Operator Link */}
+        <div style={{ marginTop: 20, padding: "14px 18px", background: C.card, borderRadius: 10, border: `1px solid ${C.accent}30` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.accent, marginBottom: 2 }}>📎 TV Operator Link</div>
+              <div style={{ fontSize: 11, color: C.textDim }}>Send this link to the administrator to display on the TV screen</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, maxWidth: 500 }}>
+              <input type="text" readOnly value={`${window.location.origin}${window.location.pathname}?tv=true`} style={{ ...ST.input, fontSize: 12, flex: 1 }} onClick={e => e.target.select()} />
+              <button style={{ ...ST.btn(), padding: "10px 14px", whiteSpace: "nowrap" }} onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?tv=true`); alert("Link copied!"); }}>📋 Copy</button>
+            </div>
+          </div>
+        </div>
+
         {/* Info bar */}
         <div style={{ marginTop: 20, padding: "14px 18px", background: C.cardAlt, borderRadius: 10, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 16 }}>ℹ️</span>
