@@ -416,16 +416,24 @@ function AgentCard({ agent, idx, aprilBackfill = {}, selectedMonth, monthlyData 
 }
 
 // ─── TV SLIDES ─────────────────────────────────────────────────────
-function TVAll({ agents }) {
-  const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
-  return (<div style={{ width: "100%", maxWidth: 1600 }}><h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, textAlign: "center", color: C.accent }}>📊 Monthly Agent Performance</h2><div style={ST.grid(3)}>{sorted.map((a, i) => <AgentCard key={a.id} agent={a} idx={i} />)}</div></div>);
+function TVAll({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {} }) {
+  const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
+  const withMonthData = agents.map(a => {
+    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData);
+    return { ...a, _monthCol: md.collections, _monthSales: md.sales, _monthLeads: md.leads };
+  });
+  const sorted = [...withMonthData].sort((a, b) => b._monthCol - a._monthCol);
+  return (<div style={{ width: "100%", maxWidth: 1600 }}><h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, textAlign: "center", color: C.accent }}>📊 Agent Performance — {MONTH_NAMES[displayMonth]} {YEAR}</h2><div style={ST.grid(3)}>{sorted.map((a, i) => <AgentCard key={a.id} agent={a} idx={i} aprilBackfill={aprilBackfill} selectedMonth={displayMonth} monthlyData={monthlyData} />)}</div></div>);
 }
 
-function TVAgent({ agent, idx, company, aprilBackfill = {} }) {
+function TVAgent({ agent, idx, company, aprilBackfill = {}, monthlyData = {}, tvDisplayMonth }) {
   const c = tri(idx);
-  const col = getMonthlyCollection(agent);
-  const leads = getMonthlyLeads(agent);
-  const sales = getMonthlySales(agent);
+  const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
+  // Get the SELECTED MONTH's data for big display
+  const md = getAgentMonthData(agent, displayMonth, aprilBackfill, monthlyData);
+  const col = md.collections;
+  const sales = md.sales;
+  const leads = md.leads;
   const p = pct(col, agent.target);
   const exceeded = col > agent.target;
   const diff = agent.target - col;
@@ -441,10 +449,9 @@ function TVAgent({ agent, idx, company, aprilBackfill = {} }) {
   const qDone = aprilCol + QUARTER_MONTHS.reduce((s, m) => s + (mb[m]||0), 0);
   const qPct = pct(qDone, qTarget);
   const qExceeded = qDone > qTarget;
-  const totalSales = sales + aprilSales;
-  const totalLeads = leads + aprilLeads;
-  const totalCollections = col + aprilCol;
-  const ratio = totalSales > 0 ? Math.round((totalCollections / totalSales) * 100) : 0;
+  const totalCollections = aprilCol + QUARTER_MONTHS.reduce((s, m) => s + (mb[m]||0), 0);
+  const totalSales = aprilSales + QUARTER_MONTHS.reduce((s, m) => s + (mbSales[m]||0), 0);
+  const totalLeads = aprilLeads + QUARTER_MONTHS.reduce((s, m) => s + (mbLeads[m]||0), 0);
   // Monthly sales data for bar chart
   const monthSalesData = [
     { name: "Apr", value: aprilSales },
@@ -465,15 +472,16 @@ function TVAgent({ agent, idx, company, aprilBackfill = {} }) {
         <h2 style={{ fontSize: 24, fontWeight: 800, margin: 0, color: "#f1f5f9" }}>
           {agent.name} {exceeded && <span style={{ animation: 'starPulse 2s ease-in-out infinite', display: 'inline-block' }}>⭐</span>}
         </h2>
-        {/* Two big metrics side by side */}
+        {/* Two big metrics side by side — showing selected month */}
+        <div style={{ fontSize: 11, color: C.accent, fontWeight: 600, textAlign: "center" }}>{MONTH_NAMES[displayMonth]} {YEAR}</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, width: "100%", maxWidth: 320 }}>
           <div style={{ background: C.cardAlt, borderRadius: 10, padding: 12, textAlign: "center", border: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>Collections</div>
+            <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>{MONTH_NAMES[displayMonth]} Collections</div>
             <div style={{ fontSize: 22, fontWeight: 800, color: exceeded ? C.gold : c }}>{fmt(col)}</div>
             <div style={{ fontSize: 10, color: C.textDim }}>QAR</div>
           </div>
           <div style={{ background: C.cardAlt, borderRadius: 10, padding: 12, textAlign: "center", border: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>Sales</div>
+            <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>{MONTH_NAMES[displayMonth]} Sales</div>
             <div style={{ fontSize: 22, fontWeight: 800, color: C.success }}>{fmt(sales)}</div>
             <div style={{ fontSize: 10, color: C.textDim }}>count</div>
           </div>
@@ -562,17 +570,43 @@ function TVCompany({ company, agents, aprilBackfill = {}, selectedQ = 2 }) {
   );
 }
 
-function TVWeekly({ agents }) {
-  const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
+function TVWeekly({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {} }) {
+  const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
+  const monthTh = getMonthThursdays(displayMonth);
+  const isMonthlyOnly = displayMonth === 3 || monthTh.indices.length === 0; // April or months without weekly data
+  const withMonthData = agents.map(a => {
+    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData);
+    return { ...a, _monthCol: md.collections, _monthSales: md.sales };
+  });
+  const sorted = [...withMonthData].sort((a, b) => b._monthCol - a._monthCol);
+
+  if (isMonthlyOnly) {
+    // Show monthly totals table instead of weekly
+    return (
+      <div style={{ width: "100%", maxWidth: 1600, overflow: "auto" }}>
+        <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, textAlign: "center", color: C.accent }}>📅 {MONTH_NAMES[displayMonth]} {YEAR} — Monthly Totals</h2>
+        <table style={ST.table}>
+          <thead><tr><th style={ST.th}>Agent</th><th style={{ ...ST.th, textAlign: "right" }}>Collections</th><th style={{ ...ST.th, textAlign: "right" }}>Sales</th></tr></thead>
+          <tbody>{sorted.map((a, i) => {
+            const c = tri(i);
+            return (<tr key={a.id}><td style={{ ...ST.td, borderRadius: "8px 0 0 8px", fontWeight: 600, color: "#f1f5f9" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: c, marginRight: 8 }} />{a.name}</td>
+              <td style={{ ...ST.td, textAlign: "right", fontWeight: 700, color: C.gold }}>{a._monthCol > 0 ? fmt(a._monthCol) : <span style={{ color: C.textDim }}>—</span>}</td>
+              <td style={{ ...ST.td, borderRadius: "0 8px 8px 0", textAlign: "right", fontWeight: 700, color: C.success }}>{a._monthSales > 0 ? fmt(a._monthSales) : <span style={{ color: C.textDim }}>—</span>}</td></tr>);
+          })}</tbody>
+        </table>
+      </div>
+    );
+  }
+
   return (
     <div style={{ width: "100%", maxWidth: 1600, overflow: "auto" }}>
-      <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, textAlign: "center", color: C.accent }}>📅 Weekly Collections Breakdown</h2>
+      <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, textAlign: "center", color: C.accent }}>📅 {MONTH_NAMES[displayMonth]} Weekly Collections</h2>
       <table style={ST.table}>
-        <thead><tr><th style={ST.th}>Agent</th>{LEGACY_LABELS.map(w => <th key={w} style={{ ...ST.th, textAlign: "right" }}>{w}</th>)}<th style={{ ...ST.th, textAlign: "right" }}>Total</th></tr></thead>
+        <thead><tr><th style={ST.th}>Agent</th>{monthTh.labels.map(w => <th key={w} style={{ ...ST.th, textAlign: "right" }}>{w}</th>)}<th style={{ ...ST.th, textAlign: "right" }}>Total</th></tr></thead>
         <tbody>{sorted.map((a, i) => {
-          const total = getMonthlyCollection(a); const c = tri(i);
+          let total = 0; const c = tri(i);
           return (<tr key={a.id}><td style={{ ...ST.td, borderRadius: "8px 0 0 8px", fontWeight: 600, color: "#f1f5f9" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: c, marginRight: 8 }} />{a.name}</td>
-            {(a.weeklyCollections||[]).map((v, j) => <td key={j} style={{ ...ST.td, textAlign: "right" }}>{v > 0 ? fmt(v) : <span style={{ color: C.textDim }}>—</span>}</td>)}
+            {monthTh.indices.map(j => { const v = (a.weeklyCollections||[])[j]||0; total += v; return <td key={j} style={{ ...ST.td, textAlign: "right" }}>{v > 0 ? fmt(v) : <span style={{ color: C.textDim }}>—</span>}</td>; })}
             <td style={{ ...ST.td, borderRadius: "0 8px 8px 0", textAlign: "right", fontWeight: 700, color: c }}>{fmt(total)}</td></tr>);
         })}</tbody>
       </table>
@@ -589,17 +623,23 @@ const DEFAULT_SLIDE_DEFS = [
   { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000 },
 ];
 
-function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 2) {
+function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 2, monthlyData = {}) {
   const tvAgents = agents.filter(a => !a.hideFromTV);
-  const sorted = [...tvAgents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
-  const activeAgents = sorted.filter(a => getMonthlyCollection(a) > 0);
+  const tvMonth = tvSettings?.tvMonth !== undefined ? tvSettings.tvMonth : new Date().getMonth();
+  // Sort and filter by selected month's data
+  const agentsWithMonthData = tvAgents.map(a => {
+    const md = getAgentMonthData(a, tvMonth, aprilBackfill, monthlyData);
+    return { ...a, _tvMonthCol: md.collections, _tvMonthSales: md.sales, _tvMonthLeads: md.leads };
+  });
+  const sorted = [...agentsWithMonthData].sort((a, b) => b._tvMonthCol - a._tvMonthCol);
+  const activeAgents = sorted.filter(a => a._tvMonthCol > 0 || a._tvMonthSales > 0);
 
   const allSlides = [
-    { id: "company", name: "Company overview", icon: "🏢", type: "fixed", defaultDur: 20000, comp: <TVCompany company={company} agents={tvAgents} aprilBackfill={aprilBackfill} selectedQ={selectedQ} /> },
-    { id: "allAgents", name: "All agents", icon: "👥", type: "fixed", defaultDur: 15000, comp: <TVAll agents={tvAgents} /> },
-    { id: "weekly", name: "Weekly breakdown", icon: "📅", type: "fixed", defaultDur: 15000, comp: <TVWeekly agents={tvAgents} /> },
-    ...activeAgents.map((a, i) => ({ id: `agent_${a.id}`, name: a.name, icon: "", image: a.image, type: "agent", defaultDur: 10000, comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} /> })),
-    { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000, comp: <TVPodium agents={tvAgents} /> },
+    { id: "company", name: "Company overview", icon: "🏢", type: "fixed", defaultDur: 20000, comp: <TVCompany company={company} agents={tvAgents} aprilBackfill={aprilBackfill} selectedQ={tvSettings?.tvQuarter || selectedQ} monthlyData={monthlyData} /> },
+    { id: "allAgents", name: "All agents", icon: "👥", type: "fixed", defaultDur: 15000, comp: <TVAll agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
+    { id: "weekly", name: "Weekly breakdown", icon: "📅", type: "fixed", defaultDur: 15000, comp: <TVWeekly agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
+    ...activeAgents.map((a, i) => ({ id: `agent_${a.id}`, name: a.name, icon: "", image: a.image, type: "agent", defaultDur: 10000, comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} monthlyData={monthlyData} tvDisplayMonth={tvMonth} /> })),
+    { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000, comp: <TVPodium agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
   ];
 
   if (!tvSettings || !tvSettings.slides) return allSlides.map(s => ({ ...s, visible: true, dur: s.defaultDur }));
@@ -629,8 +669,13 @@ function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 
 }
 
 // ─── TV PODIUM (Top 3 Leaderboard) ─────────────────────────────────
-function TVPodium({ agents }) {
-  const sorted = [...agents].sort((a, b) => getMonthlySales(b) - getMonthlySales(a));
+function TVPodium({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {} }) {
+  const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
+  const withMonthData = agents.map(a => {
+    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData);
+    return { ...a, _mSales: md.sales, _mCol: md.collections };
+  });
+  const sorted = [...withMonthData].sort((a, b) => b._mSales - a._mSales);
   const top3 = sorted.slice(0, 3);
   const podiumOrder = top3.length === 3 ? [top3[1], top3[0], top3[2]] : top3;
   const medals = { 0: { emoji: "🥈", label: "2nd Place", color: "#94a3b8", height: 140 }, 1: { emoji: "🥇", label: "1st Place", color: C.gold, height: 180 }, 2: { emoji: "🥉", label: "3rd Place", color: "#cd7f32", height: 110 } };
@@ -638,13 +683,13 @@ function TVPodium({ agents }) {
 
   return (
     <div style={{ width: "100%", maxWidth: 1200, textAlign: "center" }}>
-      <h2 style={{ fontSize: 32, fontWeight: 800, marginBottom: 8, color: C.gold }}>🏆 Top Performers</h2>
-      <p style={{ fontSize: 14, color: C.textDim, marginBottom: 40 }}>Monthly Sales Leaderboard</p>
+      <h2 style={{ fontSize: 32, fontWeight: 800, marginBottom: 8, color: C.gold }}>🏆 Top Performers — {MONTH_NAMES[displayMonth]}</h2>
+      <p style={{ fontSize: 14, color: C.textDim, marginBottom: 40 }}>Sales Leaderboard</p>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 24 }}>
         {podiumOrder.map((agent, vi) => {
           const pc = podiumColors[vi];
-          const salesCount = getMonthlySales(agent);
-          const col = getMonthlyCollection(agent);
+          const salesCount = agent._mSales;
+          const col = agent._mCol;
           const isFirst = vi === 1;
           return (
             <div key={agent.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", width: isFirst ? 280 : 220 }}>
@@ -675,7 +720,7 @@ function TVPodium({ agents }) {
       {sorted.length > 3 && (
         <div style={{ marginTop: 32, display: "flex", justifyContent: "center", gap: 32 }}>
           {sorted.slice(3, 5).map((a, i) => {
-            const salesCount = getMonthlySales(a);
+            const salesCount = a._mSales;
             if (salesCount <= 0) return null;
             return (
               <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: `1px solid ${C.border}` }}>
@@ -693,8 +738,9 @@ function TVPodium({ agents }) {
 }
 
 // ─── TV MODE ───────────────────────────────────────────────────────
-function TVMode({ agents, company, logo, onClose, aprilBackfill = {}, tvSettings = null, selectedQ = 2 }) {
-  const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ);
+function TVMode({ agents, company, logo, onClose, aprilBackfill = {}, tvSettings = null, selectedQ = 2, monthlyData = {} }) {
+  const tvMonth = tvSettings?.tvMonth !== undefined ? tvSettings.tvMonth : new Date().getMonth();
+  const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ, monthlyData);
   const visibleSlides = allSlides.filter(s => s.visible);
   const slides = visibleSlides.map(s => ({ comp: s.comp, dur: s.dur }));
   const [cur, setCur] = useState(0);
@@ -715,6 +761,7 @@ function TVMode({ agents, company, logo, onClose, aprilBackfill = {}, tvSettings
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span style={{ fontSize: 13, color: C.textDim }}>Slide {cur+1}/{slides.length}</span>
+          <span style={{ fontSize: 13, color: C.success, fontWeight: 600 }}>📅 {MONTH_NAMES[tvMonth]} {YEAR}</span>
           <span style={{ fontSize: 14, color: C.accent }}>{new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</span>
           <button onClick={onClose} style={{ ...ST.btn(C.danger), padding: "6px 14px" }}>✕ Exit TV</button>
         </div>
@@ -1193,6 +1240,8 @@ export default function SalesDashboard() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth()); // 0-indexed current month
   const [tableView, setTableView] = useState("collections");
   const [monthlyData, setMonthlyData] = useState({});
+  const [tvDisplayQ, setTvDisplayQ] = useState(2); // Which quarter to show on TV
+  const [tvDisplayMonth, setTvDisplayMonth] = useState(5); // Which month to show on TV (default June = 5)
   const logoRef = useRef(null);
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => { setLoggedIn(!!u); setAuthLoading(false); }); return () => u(); }, []);
@@ -1353,11 +1402,11 @@ export default function SalesDashboard() {
   const today = new Date();
   const dateStr = today.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} tvSettings={tvSettings} selectedQ={selectedQ} />;
+  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} tvSettings={tvSettings} selectedQ={selectedQ} monthlyData={monthlyData} />;
 
   // ─── TV EDITS PAGE ────────────────────────────────────────────────
   const TVEdits = () => {
-    const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings);
+    const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ, monthlyData);
     const [localSlides, setLocalSlides] = useState(allSlides);
     const [dragIdx, setDragIdx] = useState(null);
     const [editTimer, setEditTimer] = useState(null);
@@ -1365,7 +1414,7 @@ export default function SalesDashboard() {
     // Sync when allSlides change (new agents, etc.) but preserve local order/settings
     useEffect(() => {
       if (tvSettings && tvSettings.slides) {
-        setLocalSlides(buildSlideList(agents, company, aprilBackfill, tvSettings));
+        setLocalSlides(buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ, monthlyData));
       } else {
         setLocalSlides(allSlides);
       }
@@ -1400,7 +1449,7 @@ export default function SalesDashboard() {
     const resetDefaults = () => {
       if (!window.confirm("Reset all TV slide settings to default order and timers?")) return;
       saveTvSettings({});
-      setLocalSlides(buildSlideList(agents, company, aprilBackfill, null));
+      setLocalSlides(buildSlideList(agents, company, aprilBackfill, null, selectedQ, monthlyData));
     };
 
     const handleDragStart = (idx) => setDragIdx(idx);
@@ -1426,6 +1475,42 @@ export default function SalesDashboard() {
           <div style={{ display: "flex", gap: 8 }}>
             <button style={ST.btnO} onClick={resetDefaults}>🔄 Reset to default</button>
             <button style={ST.btn()} onClick={() => setTvMode(true)}>▶️ Launch TV</button>
+          </div>
+        </div>
+
+        {/* TV Display Month Selector */}
+        <div style={{ ...ST.card, marginBottom: 16, padding: 14, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, border: `1px solid ${C.accent}30` }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>📅 TV Display Period</div>
+            <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>Choose which month's data to show on TV slides</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 2, background: C.bg, borderRadius: 8, padding: 2, border: `1px solid ${C.border}` }}>
+              {[1, 2, 3, 4].map(q => (
+                <button key={q} onClick={() => {
+                  const newMonth = getQuarterMonths(q)[0];
+                  saveTvSettings({ ...(tvSettings || {}), slides: (tvSettings || {}).slides, tvQuarter: q, tvMonth: newMonth });
+                }} style={{
+                  padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "Arial",
+                  background: (tvSettings?.tvQuarter || selectedQ) === q ? C.accent : "transparent",
+                  color: (tvSettings?.tvQuarter || selectedQ) === q ? "#000" : C.textDim,
+                }}>Q{q}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 2, background: C.bg, borderRadius: 8, padding: 2, border: `1px solid ${C.border}` }}>
+              {getQuarterMonths(tvSettings?.tvQuarter || selectedQ).map(m => (
+                <button key={m} onClick={() => {
+                  saveTvSettings({ ...(tvSettings || {}), slides: (tvSettings || {}).slides, tvQuarter: tvSettings?.tvQuarter || selectedQ, tvMonth: m });
+                }} style={{
+                  padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "Arial",
+                  background: (tvSettings?.tvMonth ?? selectedMonth) === m ? C.success : "transparent",
+                  color: (tvSettings?.tvMonth ?? selectedMonth) === m ? "#000" : C.textDim,
+                }}>{MONTH_NAMES[m]}</button>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, color: C.success, fontWeight: 600 }}>
+              Showing: {MONTH_NAMES[tvSettings?.tvMonth ?? selectedMonth]} {YEAR}
+            </div>
           </div>
         </div>
 
