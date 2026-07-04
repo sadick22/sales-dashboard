@@ -999,15 +999,29 @@ function PipelineViewModal({ agents, aprilBackfill = {}, selectedQ = 2, onClose 
 
 // ─── MODAL: MONTHLY INPUT ──────────────────────────────────────────
 function MonthlyInputModal({ agents, monthIdx, monthlyData, aprilBackfill, onSave, onClose }) {
-  const monthName = MONTH_NAMES[monthIdx];
+  const [activeMonth, setActiveMonth] = useState(monthIdx);
+  const monthName = MONTH_NAMES[activeMonth];
+  const allQuarterMonths = [3, 4, 5]; // Apr, May, Jun for Q2
+
   const [data, setData] = useState(() => {
     const d = {};
     agents.forEach(a => {
-      const existing = getAgentMonthData(a, monthIdx, aprilBackfill, monthlyData);
+      const existing = getAgentMonthData(a, activeMonth, aprilBackfill, monthlyData);
       d[a.id] = { collections: existing.collections, sales: existing.sales, leads: existing.leads };
     });
     return d;
   });
+
+  // Reload data when month changes
+  const switchMonth = (m) => {
+    setActiveMonth(m);
+    const d = {};
+    agents.forEach(a => {
+      const existing = getAgentMonthData(a, m, aprilBackfill, monthlyData);
+      d[a.id] = { collections: existing.collections, sales: existing.sales, leads: existing.leads };
+    });
+    setData(d);
+  };
 
   const updateField = (id, field, val) => {
     setData(prev => ({ ...prev, [id]: { ...prev[id], [field]: Number(val) || 0 } }));
@@ -1018,7 +1032,7 @@ function MonthlyInputModal({ agents, monthIdx, monthlyData, aprilBackfill, onSav
   const totalLeads = Object.values(data).reduce((s, d) => s + (d.leads || 0), 0);
 
   const handleSave = () => {
-    const mKey = `m${monthIdx}`;
+    const mKey = `m${activeMonth}`;
     const updated = { ...monthlyData, [mKey]: data };
     onSave(updated);
   };
@@ -1028,6 +1042,20 @@ function MonthlyInputModal({ agents, monthIdx, monthlyData, aprilBackfill, onSav
       <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>📅 {monthName} {YEAR} — Monthly Data Entry</h3>
       <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 4px" }}>Enter each agent's {monthName} totals for collections, sales, and leads.</p>
       <p style={{ fontSize: 11, color: C.warning, margin: "0 0 16px" }}>⚠️ Monthly entry overrides weekly data for this month. Use weekly input if you prefer week-by-week tracking.</p>
+
+      {/* Month selector inside modal */}
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
+        <label style={{ fontSize: 12, color: C.textDim, fontWeight: 600 }}>Select month:</label>
+        <div style={{ display: "flex", gap: 2, background: C.bg, borderRadius: 8, padding: 2, border: `1px solid ${C.border}` }}>
+          {allQuarterMonths.map(m => (
+            <button key={m} onClick={() => switchMonth(m)} style={{
+              padding: "6px 16px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "Arial",
+              background: activeMonth === m ? C.success : "transparent",
+              color: activeMonth === m ? "#000" : C.textDim,
+            }}>{MONTH_NAMES[m]}</button>
+          ))}
+        </div>
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
         <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600 }}>Agent</div>
