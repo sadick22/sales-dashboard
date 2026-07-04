@@ -640,6 +640,7 @@ function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 
     { id: "weekly", name: "Weekly breakdown", icon: "📅", type: "fixed", defaultDur: 15000, comp: <TVWeekly agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
     ...activeAgents.map((a, i) => ({ id: `agent_${a.id}`, name: a.name, icon: "", image: a.image, type: "agent", defaultDur: 10000, comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} monthlyData={monthlyData} tvDisplayMonth={tvMonth} /> })),
     { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000, comp: <TVPodium agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
+    { id: "agentOfMonth", name: "Agent of the month", icon: "👑", type: "fixed", defaultDur: 20000, comp: <TVAgentOfMonth agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
   ];
 
   if (!tvSettings || !tvSettings.slides) return allSlides.map(s => ({ ...s, visible: true, dur: s.defaultDur }));
@@ -733,6 +734,106 @@ function TVPodium({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {}
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── TV AGENT OF THE MONTH ─────────────────────────────────────────
+function TVAgentOfMonth({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {} }) {
+  const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
+  const withMonthData = agents.map(a => {
+    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData);
+    return { ...a, _mSales: md.sales, _mCol: md.collections, _mLeads: md.leads };
+  });
+  const sorted = [...withMonthData].sort((a, b) => b._mSales - a._mSales);
+  const winner = sorted[0];
+  if (!winner || winner._mSales <= 0) return null;
+  const targetPct = pct(winner._mCol, winner.target);
+  const confettiColors = [C.gold, C.success, C.accent, C.purple, C.pink, C.danger, "#f59e0b", "#6366f1"];
+
+  // Inject celebration animations
+  const animId = "aotm-anims";
+  useEffect(() => {
+    if (typeof document !== "undefined" && !document.getElementById(animId)) {
+      const s = document.createElement("style");
+      s.id = animId;
+      s.textContent = `
+        @keyframes aotmConfetti { 0%{transform:translateY(-20px) rotate(0deg);opacity:1} 100%{transform:translateY(110vh) rotate(720deg);opacity:0.3} }
+        @keyframes aotmBalloon { 0%{transform:translateY(110vh) rotate(-5deg);opacity:0} 10%{opacity:1} 100%{transform:translateY(-40px) rotate(5deg);opacity:0.6} }
+        @keyframes aotmCrown { 0%{transform:scale(1)} 50%{transform:scale(1.15)} 100%{transform:scale(1)} }
+        @keyframes aotmShimmer { 0%{opacity:0.4} 50%{opacity:1} 100%{opacity:0.4} }
+        @keyframes aotmSlideUp { 0%{transform:translateY(30px);opacity:0} 100%{transform:translateY(0);opacity:1} }
+      `;
+      document.head.appendChild(s);
+    }
+  }, []);
+
+  // Generate confetti elements
+  const confetti = useMemo(() => Array.from({ length: 60 }, (_, i) => {
+    const size = 4 + Math.random() * 8;
+    const isCircle = Math.random() > 0.5;
+    return { left: `${Math.random() * 100}%`, size, isCircle, color: confettiColors[i % confettiColors.length], delay: Math.random() * 4, dur: 2.5 + Math.random() * 3 };
+  }), []);
+
+  const balloons = useMemo(() => Array.from({ length: 8 }, (_, i) => {
+    const emojis = ["🎈", "🎉", "🎊"];
+    return { left: `${5 + Math.random() * 90}%`, emoji: emojis[i % 3], size: 28 + Math.random() * 20, delay: Math.random() * 6, dur: 6 + Math.random() * 5 };
+  }), []);
+
+  return (
+    <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" }}>
+      {/* Confetti */}
+      {confetti.map((c, i) => (
+        <div key={`c${i}`} style={{ position: "absolute", left: c.left, top: -20, width: c.size, height: c.isCircle ? c.size : c.size * 2.5, background: c.color, borderRadius: c.isCircle ? "50%" : 2, animation: `aotmConfetti ${c.dur}s linear ${c.delay}s infinite`, opacity: 0.8, pointerEvents: "none", zIndex: 1 }} />
+      ))}
+      {/* Balloons */}
+      {balloons.map((b, i) => (
+        <div key={`b${i}`} style={{ position: "absolute", left: b.left, bottom: -40, fontSize: b.size, animation: `aotmBalloon ${b.dur}s ease-out ${b.delay}s infinite`, opacity: 0, pointerEvents: "none", zIndex: 1 }}>{b.emoji}</div>
+      ))}
+      {/* Main content */}
+      <div style={{ textAlign: "center", zIndex: 10, padding: "40px 20px" }}>
+        <div style={{ fontSize: 40, marginBottom: 8, animation: "aotmCrown 2s ease-in-out infinite", filter: "drop-shadow(0 0 12px rgba(251,191,36,0.5))" }}>👑</div>
+        <div style={{ fontSize: 14, letterSpacing: 6, textTransform: "uppercase", color: C.gold, marginBottom: 24, animation: "aotmShimmer 2s ease-in-out infinite" }}>Agent of the month</div>
+
+        {winner.image ? (
+          <img src={winner.image} alt={winner.name} style={{ width: 160, height: 160, borderRadius: "50%", border: `5px solid ${C.gold}`, objectFit: "cover", boxShadow: `0 0 40px ${C.gold}35, 0 0 80px ${C.gold}15`, marginBottom: 20, animation: "aotmSlideUp 0.8s ease-out" }} />
+        ) : (
+          <div style={{ width: 160, height: 160, borderRadius: "50%", background: `linear-gradient(135deg, ${C.gold}, #f59e0b)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 48, color: "#fff", border: `5px solid ${C.gold}`, boxShadow: `0 0 40px ${C.gold}35, 0 0 80px ${C.gold}15`, marginBottom: 20, animation: "aotmSlideUp 0.8s ease-out" }}>{initials(winner.name)}</div>
+        )}
+
+        <h2 style={{ fontSize: 36, fontWeight: 800, margin: "0 0 4px", color: "#f1f5f9", animation: "aotmSlideUp 0.8s ease-out 0.1s both" }}>{winner.name}</h2>
+        <div style={{ fontSize: 14, color: C.success, marginBottom: 28, animation: "aotmSlideUp 0.8s ease-out 0.2s both" }}>{MONTH_NAMES[displayMonth]} {YEAR}</div>
+
+        <div style={{ display: "inline-grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 28, animation: "aotmSlideUp 0.8s ease-out 0.3s both" }}>
+          <div style={{ background: C.cardAlt, borderRadius: 12, padding: "16px 28px", border: `1px solid ${C.gold}40`, textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 6 }}>Total sales</div>
+            <div style={{ fontSize: 32, fontWeight: 800, color: C.success }}>{fmt(winner._mSales)}</div>
+            <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>count</div>
+          </div>
+          <div style={{ background: C.cardAlt, borderRadius: 12, padding: "16px 28px", border: `1px solid ${C.gold}40`, textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 6 }}>Collections</div>
+            <div style={{ fontSize: 32, fontWeight: 800, color: C.gold }}>{fmt(winner._mCol)}</div>
+            <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>QAR</div>
+          </div>
+        </div>
+
+        <div style={{ display: "inline-flex", gap: 24, animation: "aotmSlideUp 0.8s ease-out 0.4s both" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.purple }}>{winner._mLeads}</div>
+            <div style={{ fontSize: 10, color: C.textDim }}>Leads</div>
+          </div>
+          <div style={{ width: 1, background: C.border }} />
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.accent }}>{targetPct}%</div>
+            <div style={{ fontSize: 10, color: C.textDim }}>Target achieved</div>
+          </div>
+          <div style={{ width: 1, background: C.border }} />
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.pink }}>MVP</div>
+            <div style={{ fontSize: 10, color: C.textDim }}>Recognition</div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
