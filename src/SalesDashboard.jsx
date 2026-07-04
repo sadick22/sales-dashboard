@@ -468,8 +468,8 @@ function TVAgent({ agent, idx, company, aprilBackfill = {}, monthlyData = {}, tv
   return (
     <div style={{ width: "100%", maxWidth: 1400, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
-        {agent.image ? <img src={agent.image} alt={agent.name} style={{ width: 90, height: 90, borderRadius: "50%", border: `3px solid ${exceeded ? C.gold : c}`, objectFit: "cover", ...(exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite' } : {}) }} /> : <div style={{ ...ST.av(c), width: 90, height: 90, fontSize: 28, ...(exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite', background: `linear-gradient(135deg, ${C.gold}, ${C.gold}88)` } : {}) }}>{initials(agent.name)}</div>}
-        <h2 style={{ fontSize: 24, fontWeight: 800, margin: 0, color: "#f1f5f9" }}>
+        {agent.image ? <img src={agent.image} alt={agent.name} style={{ width: 150, height: 150, borderRadius: "50%", border: `4px solid ${exceeded ? C.gold : c}`, objectFit: "cover", boxShadow: exceeded ? `0 0 24px ${C.gold}40` : "none", ...(exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite' } : {}) }} /> : <div style={{ ...ST.av(c), width: 150, height: 150, fontSize: 44, border: `4px solid ${c}`, boxShadow: exceeded ? `0 0 24px ${C.gold}40` : "none", ...(exceeded ? { animation: 'goldShimmer 3s ease-in-out infinite', background: `linear-gradient(135deg, ${C.gold}, ${C.gold}88)`, borderColor: C.gold } : {}) }}>{initials(agent.name)}</div>}
+        <h2 style={{ fontSize: 28, fontWeight: 800, margin: 0, color: "#f1f5f9" }}>
           {agent.name} {exceeded && <span style={{ animation: 'starPulse 2s ease-in-out infinite', display: 'inline-block' }}>⭐</span>}
         </h2>
         {/* Two big metrics side by side — showing selected month */}
