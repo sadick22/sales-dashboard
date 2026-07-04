@@ -804,33 +804,33 @@ function TVAgentOfMonth({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyDat
         <h2 style={{ fontSize: 36, fontWeight: 800, margin: "0 0 4px", color: "#f1f5f9", animation: "aotmSlideUp 0.8s ease-out 0.1s both" }}>{winner.name}</h2>
         <div style={{ fontSize: 14, color: C.success, marginBottom: 28, animation: "aotmSlideUp 0.8s ease-out 0.2s both" }}>{MONTH_NAMES[displayMonth]} {YEAR}</div>
 
-        <div style={{ display: "inline-grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 28, animation: "aotmSlideUp 0.8s ease-out 0.3s both" }}>
-          <div style={{ background: C.cardAlt, borderRadius: 12, padding: "16px 28px", border: `1px solid ${C.gold}40`, textAlign: "center" }}>
+        <div style={{ display: "inline-grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20, animation: "aotmSlideUp 0.8s ease-out 0.3s both" }}>
+          <div style={{ background: C.cardAlt, borderRadius: 12, padding: "16px 32px", border: `1px solid ${C.gold}40`, textAlign: "center" }}>
             <div style={{ fontSize: 11, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 6 }}>Total sales</div>
             <div style={{ fontSize: 32, fontWeight: 800, color: C.success }}>{fmt(winner._mSales)}</div>
             <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>count</div>
           </div>
-          <div style={{ background: C.cardAlt, borderRadius: 12, padding: "16px 28px", border: `1px solid ${C.gold}40`, textAlign: "center" }}>
+          <div style={{ background: C.cardAlt, borderRadius: 12, padding: "16px 32px", border: `1px solid ${C.gold}40`, textAlign: "center" }}>
             <div style={{ fontSize: 11, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 6 }}>Collections</div>
             <div style={{ fontSize: 32, fontWeight: 800, color: C.gold }}>{fmt(winner._mCol)}</div>
             <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>QAR</div>
           </div>
         </div>
 
-        <div style={{ display: "inline-flex", gap: 24, animation: "aotmSlideUp 0.8s ease-out 0.4s both" }}>
+        <div style={{ display: "inline-flex", gap: 28, background: C.cardAlt, borderRadius: 12, padding: "16px 36px", border: `1px solid ${C.border}`, animation: "aotmSlideUp 0.8s ease-out 0.4s both" }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 22, fontWeight: 800, color: C.purple }}>{winner._mLeads}</div>
-            <div style={{ fontSize: 10, color: C.textDim }}>Leads</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: C.purple }}>{winner._mLeads}</div>
+            <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>Leads</div>
           </div>
           <div style={{ width: 1, background: C.border }} />
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 22, fontWeight: 800, color: C.accent }}>{targetPct}%</div>
-            <div style={{ fontSize: 10, color: C.textDim }}>Target achieved</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: C.accent }}>{targetPct}%</div>
+            <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>Target achieved</div>
           </div>
           <div style={{ width: 1, background: C.border }} />
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 22, fontWeight: 800, color: C.pink }}>MVP</div>
-            <div style={{ fontSize: 10, color: C.textDim }}>Recognition</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: C.pink }}>MVP</div>
+            <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>Recognition</div>
           </div>
         </div>
       </div>
