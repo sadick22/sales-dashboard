@@ -625,6 +625,7 @@ const DEFAULT_SLIDE_DEFS = [
 
 function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 2, monthlyData = {}) {
   const tvAgents = agents.filter(a => !a.hideFromTV);
+  const allAgents = agents; // All agents for company totals (hidden agents still contribute)
   const tvMonth = tvSettings?.tvMonth !== undefined ? tvSettings.tvMonth : new Date().getMonth();
   // Sort and filter by selected month's data
   const agentsWithMonthData = tvAgents.map(a => {
@@ -635,7 +636,7 @@ function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 
   const activeAgents = sorted.filter(a => a._tvMonthCol > 0 || a._tvMonthSales > 0);
 
   const allSlides = [
-    { id: "company", name: "Company overview", icon: "🏢", type: "fixed", defaultDur: 20000, comp: <TVCompany company={company} agents={tvAgents} aprilBackfill={aprilBackfill} selectedQ={tvSettings?.tvQuarter || selectedQ} monthlyData={monthlyData} /> },
+    { id: "company", name: "Company overview", icon: "🏢", type: "fixed", defaultDur: 20000, comp: <TVCompany company={company} agents={allAgents} aprilBackfill={aprilBackfill} selectedQ={tvSettings?.tvQuarter || selectedQ} monthlyData={monthlyData} /> },
     { id: "allAgents", name: "All agents", icon: "👥", type: "fixed", defaultDur: 15000, comp: <TVAll agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
     { id: "weekly", name: "Weekly breakdown", icon: "📅", type: "fixed", defaultDur: 15000, comp: <TVWeekly agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
     ...activeAgents.map((a, i) => ({ id: `agent_${a.id}`, name: a.name, icon: "", image: a.image, type: "agent", defaultDur: 10000, comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} monthlyData={monthlyData} tvDisplayMonth={tvMonth} /> })),
