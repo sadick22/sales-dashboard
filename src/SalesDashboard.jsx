@@ -190,46 +190,34 @@ const getMonthBreakdown = (agent, field) => {
 };
 
 // Pipeline for any quarter — Q2 uses backfill + weekly, others use monthly data when available
-const calcPipeline = (agents, q, aprilBackfill = {}, quarterMonthlyData = {}) => {
+const calcPipeline = (agents, q, aprilBackfill = {}, quarterMonthlyData = {}, quarterWeekly = {}) => {
   const qMonths = getQuarterMonths(q);
   const result = {};
   qMonths.forEach(m => {
     let leads = 0, sales = 0, collections = 0;
-    if (q === 2) {
-      if (m === 3) {
-        // April: use backfill
-        agents.forEach(a => {
-          const bf = aprilBackfill[a.id] || {};
-          leads += bf.leads || 0;
-          sales += bf.sales || 0;
-          collections += bf.collections || 0;
-        });
-      } else {
-        // May/June: use weekly data
-        agents.forEach(a => {
-          leads += getMonthBreakdown(a, "leads")[m] || 0;
-          sales += getMonthBreakdown(a, "sales")[m] || 0;
-          collections += getMonthBreakdown(a, "collections")[m] || 0;
-        });
-      }
-    }
+    agents.forEach(a => {
+      const md = getAgentMonthData(a, m, aprilBackfill, quarterMonthlyData, quarterWeekly);
+      leads += md.leads;
+      sales += md.sales;
+      collections += md.collections;
+    });
     const ratio = sales > 0 ? Math.round((collections / sales) * 100) : 0;
     result[MONTH_NAMES[m].toLowerCase()] = { leads, sales, collections, ratio };
   });
   return result;
 };
 
-// Get Q2 total collection for an agent (April backfill + May/June weekly)
-const getAgentQ2Collection = (agent, aprilBackfill = {}) => {
-  const weeklyTotal = getMonthlyCollection(agent);
-  const aprilCol = (aprilBackfill[agent.id] || {}).collections || 0;
-  return weeklyTotal + aprilCol;
-};
-
 // Get total collection for selected quarter
-const getQuarterTotal = (agents, q, aprilBackfill = {}) => {
-  if (q === 2) return agents.reduce((s, a) => s + getAgentQ2Collection(a, aprilBackfill), 0);
-  return 0; // Other quarters: no data yet (Phase 2)
+const getQuarterTotal = (agents, q, aprilBackfill = {}, monthlyData = {}, quarterWeekly = {}) => {
+  const qMonths = getQuarterMonths(q);
+  let total = 0;
+  agents.forEach(a => {
+    qMonths.forEach(m => {
+      const md = getAgentMonthData(a, m, aprilBackfill, monthlyData, quarterWeekly);
+      total += md.collections;
+    });
+  });
+  return total;
 };
 
 // Get quarter target from company data
@@ -244,8 +232,8 @@ const getQuarterDone = (company, q) => {
 
 // ─── MONTH-SPECIFIC HELPERS ────────────────────────────────────────
 // Get agent's data for a specific month from weekly arrays + monthly overrides + april backfill
-const getAgentMonthData = (agent, monthIdx, aprilBackfill = {}, monthlyData = {}) => {
-  // Check monthly overrides first (user-entered monthly totals)
+const getAgentMonthData = (agent, monthIdx, aprilBackfill = {}, monthlyData = {}, quarterWeekly = {}) => {
+  // Check monthly overrides first
   const mKey = `m${monthIdx}`;
   const override = monthlyData[mKey] && monthlyData[mKey][agent.id];
   if (override) return { collections: override.collections || 0, sales: override.sales || 0, leads: override.leads || 0, source: "monthly" };
@@ -256,29 +244,50 @@ const getAgentMonthData = (agent, monthIdx, aprilBackfill = {}, monthlyData = {}
     return { collections: bf.collections || 0, sales: bf.sales || 0, leads: bf.leads || 0, source: "backfill" };
   }
 
-  // May/June: derive from weekly data
+  // May/June (Q2): derive from legacy weekly data on agents
+  if (monthIdx === 4 || monthIdx === 5) {
+    let collections = 0, sales = 0, leads = 0;
+    LEGACY_THURSDAYS.forEach((t, i) => {
+      if (t.getMonth() === monthIdx) {
+        collections += (agent.weeklyCollections || [])[i] || 0;
+        sales += ((agent.weeklySales || [])[i] || {}).total || 0;
+        leads += (agent.weeklyLeads || [])[i] || 0;
+      }
+    });
+    return { collections, sales, leads, source: "weekly" };
+  }
+
+  // Other quarters: derive from quarterWeekly data
+  const q = Math.floor(monthIdx / 3) + 1;
+  const qKey = `q${q}`;
+  const qData = quarterWeekly[qKey] && quarterWeekly[qKey][agent.id];
+  if (!qData) return { collections: 0, sales: 0, leads: 0, source: "none" };
+
+  const qThursdays = getQThursdays(YEAR, q);
   let collections = 0, sales = 0, leads = 0;
-  LEGACY_THURSDAYS.forEach((t, i) => {
+  qThursdays.forEach((t, i) => {
     if (t.getMonth() === monthIdx) {
-      collections += (agent.weeklyCollections || [])[i] || 0;
-      sales += ((agent.weeklySales || [])[i] || {}).total || 0;
-      leads += (agent.weeklyLeads || [])[i] || 0;
+      collections += (qData.collections || [])[i] || 0;
+      sales += ((qData.sales || [])[i] || {}).total || 0;
+      leads += (qData.leads || [])[i] || 0;
     }
   });
   return { collections, sales, leads, source: "weekly" };
 };
 
-// Get Thursdays within a specific month
-const getMonthThursdays = (monthIdx) => {
+// Get Thursdays within a specific month (supports Q2 legacy + other quarters)
+const getMonthThursdays = (monthIdx, q) => {
+  const isQ2 = q === 2 || q === undefined;
+  const thursdays = isQ2 ? LEGACY_THURSDAYS : getQThursdays(YEAR, q || Math.floor(monthIdx / 3) + 1);
   const indices = [];
   const labels = [];
-  LEGACY_THURSDAYS.forEach((t, i) => {
+  thursdays.forEach((t, i) => {
     if (t.getMonth() === monthIdx) {
       indices.push(i);
       labels.push(formatThursday(t));
     }
   });
-  return { indices, labels };
+  return { indices, labels, thursdays };
 };
 
 // ─── COLORS & UTILS ────────────────────────────────────────────────
@@ -902,18 +911,29 @@ function Login({ onLogin }) {
 }
 
 // ─── MODAL: WEEKLY LEADS ───────────────────────────────────────────
-function WeeklyLeadsModal({ agents, onSave, onClose }) {
-  const [data, setData] = useState(agents.map(a => ({ id: a.id, name: a.name, weeklyLeads: [...(a.weeklyLeads || makeEmptyWeeks())] })));
-  const [wi, setWi] = useState(getCurrentWeekIndex(LEGACY_THURSDAYS));
+function WeeklyLeadsModal({ agents, selectedQ, quarterWeekly, onSave, onClose }) {
+  const isLegacyQ2 = selectedQ === 2;
+  const thursdays = isLegacyQ2 ? LEGACY_THURSDAYS : getQThursdays(YEAR, selectedQ);
+  const numWeeks = thursdays.length;
+  const qKey = `q${selectedQ}`;
+
+  const [data, setData] = useState(agents.map(a => {
+    if (isLegacyQ2) {
+      return { id: a.id, name: a.name, weeklyLeads: [...(a.weeklyLeads || makeEmptyWeeks())] };
+    }
+    const qData = quarterWeekly[qKey] && quarterWeekly[qKey][a.id];
+    return { id: a.id, name: a.name, weeklyLeads: [...((qData && qData.leads) || new Array(numWeeks).fill(0))] };
+  }));
+  const [wi, setWi] = useState(getCurrentWeekIndex(thursdays));
   const totalLeads = data.reduce((s, d) => s + (d.weeklyLeads[wi] || 0), 0);
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mc} onClick={e => e.stopPropagation()}>
       <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>📋 Update Weekly Leads</h3>
-      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Fadwa & Lucy (Property Administrators)</p>
+      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Fadwa & Lucy (Property Administrators) &nbsp;|&nbsp; <span style={{ color: C.accent }}>Q{selectedQ}</span></p>
       <div style={{ marginBottom: 16 }}>
         <label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Week Ending (Thursday)</label>
         <select style={ST.sel} value={wi} onChange={e => setWi(Number(e.target.value))}>
-          {LEGACY_THURSDAYS.map((t, i) => <option key={i} value={i}>Week ending {formatThursdayFull(t)}</option>)}
+          {thursdays.map((t, i) => <option key={i} value={i}>Week ending {formatThursdayFull(t)}</option>)}
         </select>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -931,35 +951,42 @@ function WeeklyLeadsModal({ agents, onSave, onClose }) {
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
         <button style={ST.btnO} onClick={onClose}>Cancel</button>
-        <button style={ST.btn()} onClick={() => onSave(data)}>Save</button>
+        <button style={ST.btn()} onClick={() => onSave(data, selectedQ)}>Save</button>
       </div>
     </div></div>
   );
 }
 
 // ─── MODAL: WEEKLY COLLECTION & SALES ──────────────────────────────
-function WeeklyCollSalesModal({ agents, onSave, onClose }) {
-  const [data, setData] = useState(agents.map(a => ({
-    id: a.id, name: a.name,
-    weeklyCollections: [...(a.weeklyCollections || makeEmptyWeeks())],
-    weeklySales: (a.weeklySales || makeEmptySales()).map(s => ({ ...s })),
-  })));
-  const [wi, setWi] = useState(getCurrentWeekIndex(LEGACY_THURSDAYS));
+function WeeklyCollSalesModal({ agents, selectedQ, quarterWeekly, onSave, onClose }) {
+  const isLegacyQ2 = selectedQ === 2;
+  const thursdays = isLegacyQ2 ? LEGACY_THURSDAYS : getQThursdays(YEAR, selectedQ);
+  const numWeeks = thursdays.length;
+  const qKey = `q${selectedQ}`;
 
-  // Previous = last week's Current entry (auto-filled, read-only)
+  const [data, setData] = useState(agents.map(a => {
+    if (isLegacyQ2) {
+      return { id: a.id, name: a.name, weeklyCollections: [...(a.weeklyCollections || makeEmptyWeeks())], weeklySales: (a.weeklySales || makeEmptySales()).map(s => ({ ...s })) };
+    }
+    const qData = quarterWeekly[qKey] && quarterWeekly[qKey][a.id];
+    return {
+      id: a.id, name: a.name,
+      weeklyCollections: [...((qData && qData.collections) || new Array(numWeeks).fill(0))],
+      weeklySales: ((qData && qData.sales) || new Array(numWeeks).fill(null)).map(s => s ? { ...s } : { prev: 0, current: 0, total: 0 }),
+    };
+  }));
+  const [wi, setWi] = useState(getCurrentWeekIndex(thursdays));
+
   const getAutoPrev = (agentData, weekIdx) => {
     if (weekIdx <= 0) return 0;
     return agentData.weeklySales[weekIdx - 1]?.current || 0;
   };
 
-  // Get monthly collection total for an agent (sum of all weeks in the same month as selected week)
   const getMonthlyTotal = (agentData) => {
-    const selectedMonth = LEGACY_THURSDAYS[wi].getMonth();
+    const selectedMonth = thursdays[wi].getMonth();
     let total = 0;
-    LEGACY_THURSDAYS.forEach((t, i) => {
-      if (t.getMonth() === selectedMonth) {
-        total += agentData.weeklyCollections[i] || 0;
-      }
+    thursdays.forEach((t, i) => {
+      if (t.getMonth() === selectedMonth) total += agentData.weeklyCollections[i] || 0;
     });
     return total;
   };
@@ -971,8 +998,7 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
         if (j !== wi) return s;
         const current = Number(val) || 0;
         const prevVal = getAutoPrev(d, wi);
-        const total = current - prevVal;
-        return { prev: prevVal, current, total: Math.max(total, 0) };
+        return { prev: prevVal, current, total: Math.max(current - prevVal, 0) };
       });
       return { ...d, weeklySales: sales };
     }));
@@ -982,12 +1008,11 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
     const fixed = data.map(d => {
       const sales = d.weeklySales.map((s, j) => {
         const prevVal = j > 0 ? (d.weeklySales[j - 1]?.current || 0) : 0;
-        const total = (s.current || 0) - prevVal;
-        return { prev: prevVal, current: s.current || 0, total: Math.max(total, 0) };
+        return { prev: prevVal, current: s.current || 0, total: Math.max((s.current || 0) - prevVal, 0) };
       });
       return { ...d, weeklySales: sales };
     });
-    onSave(fixed);
+    onSave(fixed, selectedQ);
   };
 
   const totalCol = data.reduce((s, d) => s + (d.weeklyCollections[wi] || 0), 0);
@@ -997,19 +1022,19 @@ function WeeklyCollSalesModal({ agents, onSave, onClose }) {
     return s + Math.max(current - prevVal, 0);
   }, 0);
 
-  // Dynamic column headers
-  const prevHeader = getPrevWeekLabel(wi, LEGACY_THURSDAYS);
-  const weekSalesHeader = getWeekSalesLabel(wi, LEGACY_THURSDAYS);
-  const selectedMonthName = MONTH_NAMES[LEGACY_THURSDAYS[wi].getMonth()];
+  const prevHeader = wi > 0 ? `W/E ${formatThursday(thursdays[wi - 1])}` : "Opening";
+  const weekNum = getWeekOfMonth(thursdays[wi], thursdays);
+  const weekSalesHeader = `Week ${weekNum} Sales`;
+  const selectedMonthName = MONTH_NAMES[thursdays[wi].getMonth()];
 
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mcWide} onClick={e => e.stopPropagation()}>
       <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: C.text }}>💰 Update Weekly Collection & Sales</h3>
-      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Finance Department &nbsp;|&nbsp; Week ending: <span style={{ color: C.accent, fontWeight: 600 }}>{formatThursdayFull(LEGACY_THURSDAYS[wi])}</span></p>
+      <p style={{ fontSize: 12, color: C.textDim, margin: "0 0 16px" }}>For Finance Department &nbsp;|&nbsp; <span style={{ color: C.accent }}>Q{selectedQ}</span> &nbsp;|&nbsp; Week ending: <span style={{ color: C.accent, fontWeight: 600 }}>{formatThursdayFull(thursdays[wi])}</span></p>
       <div style={{ marginBottom: 16 }}>
         <label style={{ fontSize: 12, color: C.textDim, marginBottom: 6, display: "block" }}>Week Ending (Thursday)</label>
         <select style={ST.sel} value={wi} onChange={e => setWi(Number(e.target.value))}>
-          {LEGACY_THURSDAYS.map((t, i) => <option key={i} value={i}>Week ending {formatThursdayFull(t)}</option>)}
+          {thursdays.map((t, i) => <option key={i} value={i}>Week ending {formatThursdayFull(t)}</option>)}
         </select>
       </div>
 
@@ -1375,6 +1400,7 @@ export default function SalesDashboard() {
   const [tvDisplayQ, setTvDisplayQ] = useState(2);
   const [tvDisplayMonth, setTvDisplayMonth] = useState(5);
   const [dragAgent, setDragAgent] = useState(null);
+  const [quarterWeekly, setQuarterWeekly] = useState({});
   const logoRef = useRef(null);
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => { setLoggedIn(!!u); setAuthLoading(false); }); return () => u(); }, []);
@@ -1422,6 +1448,9 @@ export default function SalesDashboard() {
       }),
       onSnapshot(doc(db, "dashboard", "monthlyData"), (snap) => {
         if (snap.exists()) setMonthlyData(snap.data());
+      }),
+      onSnapshot(doc(db, "dashboard", "quarterWeekly"), (snap) => {
+        if (snap.exists()) setQuarterWeekly(snap.data());
       }),
     ];
     return () => unsubs.forEach(u => u());
@@ -1472,6 +1501,13 @@ export default function SalesDashboard() {
     setSaving(false);
   };
 
+  const saveQuarterWeekly = async (data) => {
+    setQuarterWeekly(data);
+    setSaving(true);
+    try { await setDoc(doc(db, "dashboard", "quarterWeekly"), data); console.log("Quarter weekly saved"); } catch(e) { console.error("Save quarter weekly error:", e); alert("Failed to save weekly data."); }
+    setSaving(false);
+  };
+
   const handleLogoUpload = (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -1496,14 +1532,39 @@ export default function SalesDashboard() {
     reader.readAsDataURL(f);
   };
 
-  const handleWeeklyLeadsSave = (data) => {
-    const n = agents.map(a => { const d = data.find(x => x.id === a.id); return d ? { ...a, weeklyLeads: d.weeklyLeads } : a; });
-    saveAgents(n); setModal(null);
+  const handleWeeklyLeadsSave = (data, q) => {
+    if (q === 2) {
+      const n = agents.map(a => { const d = data.find(x => x.id === a.id); return d ? { ...a, weeklyLeads: d.weeklyLeads } : a; });
+      saveAgents(n);
+    } else {
+      const qKey = `q${q}`;
+      const updated = { ...quarterWeekly };
+      if (!updated[qKey]) updated[qKey] = {};
+      data.forEach(d => {
+        if (!updated[qKey][d.id]) updated[qKey][d.id] = {};
+        updated[qKey][d.id].leads = d.weeklyLeads;
+      });
+      saveQuarterWeekly(updated);
+    }
+    setModal(null);
   };
 
-  const handleCollSalesSave = (data) => {
-    const n = agents.map(a => { const d = data.find(x => x.id === a.id); return d ? { ...a, weeklyCollections: d.weeklyCollections, weeklySales: d.weeklySales } : a; });
-    saveAgents(n); setModal(null);
+  const handleCollSalesSave = (data, q) => {
+    if (q === 2) {
+      const n = agents.map(a => { const d = data.find(x => x.id === a.id); return d ? { ...a, weeklyCollections: d.weeklyCollections, weeklySales: d.weeklySales } : a; });
+      saveAgents(n);
+    } else {
+      const qKey = `q${q}`;
+      const updated = { ...quarterWeekly };
+      if (!updated[qKey]) updated[qKey] = {};
+      data.forEach(d => {
+        if (!updated[qKey][d.id]) updated[qKey][d.id] = {};
+        updated[qKey][d.id].collections = d.weeklyCollections;
+        updated[qKey][d.id].sales = d.weeklySales;
+      });
+      saveQuarterWeekly(updated);
+    }
+    setModal(null);
   };
 
   const handleAgentSave = (form) => {
@@ -1525,9 +1586,9 @@ export default function SalesDashboard() {
   if (!dataLoaded) return (<div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ textAlign: "center" }}><div style={{ width: 60, height: 60, borderRadius: 14, background: `linear-gradient(135deg, ${C.accent}, #6366f1)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: "#fff", marginBottom: 16 }}>S</div><div style={{ color: C.textDim, fontSize: 14 }}>Loading dashboard data...</div></div></div>);
 
   const qTarget = getQuarterTarget(company, selectedQ);
-  const totalCol = getQuarterTotal(agents, selectedQ, aprilBackfill);
+  const totalCol = getQuarterTotal(agents, selectedQ, aprilBackfill, monthlyData, quarterWeekly);
   const qPct = pct(totalCol, qTarget);
-  const pipeline = calcPipeline(agents, selectedQ, aprilBackfill);
+  const pipeline = calcPipeline(agents, selectedQ, aprilBackfill, monthlyData, quarterWeekly);
   const qMonths = getQuarterMonths(selectedQ);
   const qThursdays = selectedQ === 2 ? LEGACY_THURSDAYS : getQThursdays(YEAR, selectedQ);
   const qThursdayLabels = qThursdays.map(formatThursday);
@@ -1797,14 +1858,14 @@ export default function SalesDashboard() {
 
     // Get month-specific data for each agent
     const agentMonthData = agents.map(a => {
-      const md = getAgentMonthData(a, selectedMonth, aprilBackfill, monthlyData);
+      const md = getAgentMonthData(a, selectedMonth, aprilBackfill, monthlyData, quarterWeekly);
       return { ...a, monthCol: md.collections, monthSales: md.sales, monthLeads: md.leads, monthSource: md.source };
     });
     const sortedByMonth = [...agentMonthData].sort((a, b) => b.monthCol - a.monthCol);
 
     // Month Thursdays for weekly table
-    const monthThursdays = getMonthThursdays(selectedMonth);
-    const hasMonthWeekly = monthThursdays.indices.length > 0 && isQ2 && selectedMonth !== 3; // April has no weekly data
+    const monthThursdays = getMonthThursdays(selectedMonth, selectedQ);
+    const hasMonthWeekly = monthThursdays.indices.length > 0 && (isQ2 ? selectedMonth !== 3 : true);
 
     return (
     <div style={ST.page}>
@@ -1945,10 +2006,17 @@ export default function SalesDashboard() {
             <thead><tr><th style={ST.th}>Agent</th>{monthThursdays.labels.map(w => <th key={w} style={{ ...ST.th, textAlign: "right" }}>{w}</th>)}<th style={{ ...ST.th, textAlign: "right" }}>{MONTH_NAMES[selectedMonth]} Total</th></tr></thead>
             <tbody>{sortedByMonth.map((a, i) => {
               const c = tri(i);
+              const qKey = `q${selectedQ}`;
+              const qData = !isQ2 ? (quarterWeekly[qKey] && quarterWeekly[qKey][a.id]) : null;
               let monthTotal = 0;
               return (<tr key={a.id}><td style={{ ...ST.td, borderRadius: "8px 0 0 8px", fontWeight: 600, color: "#f1f5f9" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: c, marginRight: 8 }} />{a.name}</td>
                 {monthThursdays.indices.map(j => {
-                  const v = tableView === "collections" ? ((a.weeklyCollections||[])[j]||0) : (((a.weeklySales||[])[j]||{}).total||0);
+                  let v;
+                  if (isQ2) {
+                    v = tableView === "collections" ? ((a.weeklyCollections||[])[j]||0) : (((a.weeklySales||[])[j]||{}).total||0);
+                  } else {
+                    v = tableView === "collections" ? ((qData?.collections||[])[j]||0) : (((qData?.sales||[])[j]||{}).total||0);
+                  }
                   monthTotal += v;
                   return <td key={j} style={{ ...ST.td, textAlign: "right" }}>{v > 0 ? fmt(v) : <span style={{ color: C.textDim }}>—</span>}</td>;
                 })}
@@ -2094,8 +2162,8 @@ export default function SalesDashboard() {
         </div>
       </nav>
       {page === "dashboard" ? <Dash /> : page === "tvEdits" ? <TVEdits /> : <Settings />}
-      {modal?.type === "leads" && <WeeklyLeadsModal agents={agents} onSave={handleWeeklyLeadsSave} onClose={() => setModal(null)} />}
-      {modal?.type === "collsales" && <WeeklyCollSalesModal agents={agents} onSave={handleCollSalesSave} onClose={() => setModal(null)} />}
+      {modal?.type === "leads" && <WeeklyLeadsModal agents={agents} selectedQ={selectedQ} quarterWeekly={quarterWeekly} onSave={handleWeeklyLeadsSave} onClose={() => setModal(null)} />}
+      {modal?.type === "collsales" && <WeeklyCollSalesModal agents={agents} selectedQ={selectedQ} quarterWeekly={quarterWeekly} onSave={handleCollSalesSave} onClose={() => setModal(null)} />}
       {modal?.type === "pipeline" && <PipelineViewModal agents={agents} aprilBackfill={aprilBackfill} selectedQ={selectedQ} onClose={() => setModal(null)} />}
       {modal?.type === "aprilBackfill" && <AprilBackfillModal agents={agents} aprilBackfill={aprilBackfill} onSave={(data) => { saveAprilBackfill(data); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === "monthlyInput" && <MonthlyInputModal agents={agents} monthIdx={selectedMonth} monthlyData={monthlyData} aprilBackfill={aprilBackfill} onSave={(data) => { saveMonthlyData(data); setModal(null); }} onClose={() => setModal(null)} />}
