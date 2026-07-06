@@ -632,25 +632,34 @@ const DEFAULT_SLIDE_DEFS = [
   { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000 },
 ];
 
-function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 2, monthlyData = {}) {
+function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 2, monthlyData = {}, quarterWeekly = {}) {
   const tvAgents = agents.filter(a => !a.hideFromTV);
   const allAgents = agents; // All agents for company totals (hidden agents still contribute)
   const tvMonth = tvSettings?.tvMonth !== undefined ? tvSettings.tvMonth : new Date().getMonth();
-  // Sort and filter by selected month's data
+  // Previous month for Agent of the Month
+  const prevMonth = tvMonth > 0 ? tvMonth - 1 : 11;
+  // Sort and filter by selected month's data — pass quarterWeekly!
   const agentsWithMonthData = tvAgents.map(a => {
-    const md = getAgentMonthData(a, tvMonth, aprilBackfill, monthlyData);
+    const md = getAgentMonthData(a, tvMonth, aprilBackfill, monthlyData, quarterWeekly);
     return { ...a, _tvMonthCol: md.collections, _tvMonthSales: md.sales, _tvMonthLeads: md.leads };
   });
-  const sorted = [...agentsWithMonthData].sort((a, b) => b._tvMonthCol - a._tvMonthCol);
-  const activeAgents = sorted.filter(a => a._tvMonthCol > 0 || a._tvMonthSales > 0);
+  // All agents for company (including hidden)
+  const allAgentsWithMonth = allAgents.map(a => {
+    const md = getAgentMonthData(a, tvMonth, aprilBackfill, monthlyData, quarterWeekly);
+    return { ...a, _tvMonthCol: md.collections, _tvMonthSales: md.sales, _tvMonthLeads: md.leads };
+  });
+  const sorted = [...agentsWithMonthData].sort((a, b) => b._tvMonthSales - a._tvMonthSales);
+  // OR logic: show if ANY metric > 0
+  const activeAgents = sorted.filter(a => a._tvMonthCol > 0 || a._tvMonthSales > 0 || a._tvMonthLeads > 0);
 
   const allSlides = [
-    { id: "company", name: "Company overview", icon: "🏢", type: "fixed", defaultDur: 20000, comp: <TVCompany company={company} agents={allAgents} aprilBackfill={aprilBackfill} selectedQ={tvSettings?.tvQuarter || selectedQ} monthlyData={monthlyData} /> },
-    { id: "allAgents", name: "All agents", icon: "👥", type: "fixed", defaultDur: 15000, comp: <TVAll agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
-    { id: "weekly", name: "Weekly breakdown", icon: "📅", type: "fixed", defaultDur: 15000, comp: <TVWeekly agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
-    ...activeAgents.map((a, i) => ({ id: `agent_${a.id}`, name: a.name, icon: "", image: a.image, type: "agent", defaultDur: 10000, comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} monthlyData={monthlyData} tvDisplayMonth={tvMonth} /> })),
-    { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000, comp: <TVPodium agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
-    { id: "agentOfMonth", name: "Agent of the month", icon: "👑", type: "fixed", defaultDur: 20000, comp: <TVAgentOfMonth agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} /> },
+    { id: "company", name: "Company overview", icon: "🏢", type: "fixed", defaultDur: 20000, comp: <TVCompany company={company} agents={allAgents} aprilBackfill={aprilBackfill} selectedQ={tvSettings?.tvQuarter || selectedQ} monthlyData={monthlyData} quarterWeekly={quarterWeekly} /> },
+    { id: "liveRankings", name: "Live rankings", icon: "📊", type: "fixed", defaultDur: 18000, comp: <TVLiveRankings agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} quarterWeekly={quarterWeekly} /> },
+    { id: "allAgents", name: "All agents", icon: "👥", type: "fixed", defaultDur: 15000, comp: <TVAll agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} quarterWeekly={quarterWeekly} /> },
+    { id: "weekly", name: "Weekly breakdown", icon: "📅", type: "fixed", defaultDur: 15000, comp: <TVWeekly agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} quarterWeekly={quarterWeekly} /> },
+    ...activeAgents.map((a, i) => ({ id: `agent_${a.id}`, name: a.name, icon: "", image: a.image, type: "agent", defaultDur: 10000, comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} monthlyData={monthlyData} tvDisplayMonth={tvMonth} quarterWeekly={quarterWeekly} /> })),
+    { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000, comp: <TVPodium agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} quarterWeekly={quarterWeekly} /> },
+    { id: "agentOfMonth", name: "Agent of the month", icon: "👑", type: "fixed", defaultDur: 20000, comp: <TVAgentOfMonth agents={allAgents} tvDisplayMonth={prevMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} quarterWeekly={quarterWeekly} /> },
   ];
 
   if (!tvSettings || !tvSettings.slides) return allSlides.map(s => ({ ...s, visible: true, dur: s.defaultDur }));
@@ -677,6 +686,59 @@ function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 
   });
 
   return result;
+}
+
+// ─── TV LIVE RANKINGS (All agents with movement arrows) ────────────
+function TVLiveRankings({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {}, quarterWeekly = {} }) {
+  const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
+  const withData = agents.map(a => {
+    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData, quarterWeekly);
+    const prevMonth = displayMonth > 0 ? displayMonth - 1 : 11;
+    const prevMd = getAgentMonthData(a, prevMonth, aprilBackfill, monthlyData, quarterWeekly);
+    return { ...a, sales: md.sales, col: md.collections, leads: md.leads, prevSales: prevMd.sales };
+  });
+  const sorted = [...withData].sort((a, b) => b.sales - a.sales);
+  const prevSorted = [...withData].sort((a, b) => b.prevSales - a.prevSales);
+  const prevRankMap = {};
+  prevSorted.forEach((a, i) => { prevRankMap[a.id] = i + 1; });
+
+  return (
+    <div style={{ width: "100%", maxWidth: 1400, textAlign: "center" }}>
+      <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 6, color: C.accent }}>📊 Live Rankings — {MONTH_NAMES[displayMonth]} {YEAR}</h2>
+      <p style={{ fontSize: 13, color: C.textDim, marginBottom: 24 }}>Ranked by sales · Updated in real-time</p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, textAlign: "left" }}>
+        {sorted.map((a, i) => {
+          const rank = i + 1;
+          const prevRank = prevRankMap[a.id] || rank;
+          const moved = prevRank - rank;
+          const moveColor = moved > 0 ? C.success : moved < 0 ? C.danger : C.textDim;
+          const moveIcon = moved > 0 ? "▲" : moved < 0 ? "▼" : "●";
+          const moveText = moved > 0 ? `+${moved}` : moved < 0 ? `${moved}` : "—";
+          const isTop3 = rank <= 3;
+          const borderColor = rank === 1 ? C.gold : rank === 2 ? "#94a3b8" : rank === 3 ? "#cd7f32" : C.border;
+          return (
+            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10, background: isTop3 ? `${borderColor}12` : "rgba(255,255,255,0.02)", borderLeft: `3px solid ${borderColor}`, marginBottom: 2 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: isTop3 ? `${borderColor}30` : C.cardAlt, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, color: isTop3 ? borderColor : C.textDim, flexShrink: 0 }}>{rank}</div>
+              <div style={{ width: 32, textAlign: "center", flexShrink: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: moveColor }}>{moveIcon}</div>
+                <div style={{ fontSize: 9, color: moveColor }}>{moveText}</div>
+              </div>
+              {a.image ? <img src={a.image} alt={a.name} style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} /> : <div style={{ ...ST.av(tri(i)), width: 36, height: 36, fontSize: 13, flexShrink: 0 }}>{initials(a.name)}</div>}
+              <span style={{ flex: 1, fontWeight: 600, fontSize: 14, color: "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: C.success }}>{fmt(a.sales)}</div>
+                <div style={{ fontSize: 9, color: C.textDim }}>sales</div>
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0, width: 80 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.gold }}>{fmt(a.col)}</div>
+                <div style={{ fontSize: 9, color: C.textDim }}>QAR</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ─── TV PODIUM (Top 3 Leaderboard) ─────────────────────────────────
@@ -749,10 +811,10 @@ function TVPodium({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {}
 }
 
 // ─── TV AGENT OF THE MONTH ─────────────────────────────────────────
-function TVAgentOfMonth({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {} }) {
+function TVAgentOfMonth({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {}, quarterWeekly = {} }) {
   const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
   const withMonthData = agents.map(a => {
-    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData);
+    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData, quarterWeekly);
     return { ...a, _mSales: md.sales, _mCol: md.collections, _mLeads: md.leads };
   });
   const sorted = [...withMonthData].sort((a, b) => b._mSales - a._mSales);
@@ -851,22 +913,36 @@ function TVAgentOfMonth({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyDat
 }
 
 // ─── TV MODE ───────────────────────────────────────────────────────
-function TVMode({ agents, company, logo, onClose, aprilBackfill = {}, tvSettings = null, selectedQ = 2, monthlyData = {} }) {
+function TVMode({ agents, company, logo, onClose, aprilBackfill = {}, tvSettings = null, selectedQ = 2, monthlyData = {}, quarterWeekly = {} }) {
   const tvMonth = tvSettings?.tvMonth !== undefined ? tvSettings.tvMonth : new Date().getMonth();
-  const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ, monthlyData);
+  const isPreview = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tv") === "preview";
+  const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ, monthlyData, quarterWeekly);
   const visibleSlides = allSlides.filter(s => s.visible);
   const slides = visibleSlides.map(s => ({ comp: s.comp, dur: s.dur }));
   const [cur, setCur] = useState(0);
   const [prog, setProg] = useState(0);
+  const [paused, setPaused] = useState(false);
   const tRef = useRef(null), pRef = useRef(null);
+
+  // Auto-refresh production TV every 4 hours to keep session alive
   useEffect(() => {
+    if (!isPreview) {
+      const refreshTimer = setInterval(() => { window.location.reload(); }, 4 * 60 * 60 * 1000);
+      return () => clearInterval(refreshTimer);
+    }
+  }, [isPreview]);
+
+  useEffect(() => {
+    if (paused || slides.length === 0) return;
     const dur = slides[cur]?.dur || 10000; const start = Date.now();
     pRef.current = setInterval(() => setProg((Date.now()-start)/dur*100), 50);
     tRef.current = setTimeout(() => { setCur(p => (p+1)%slides.length); setProg(0); }, dur);
     return () => { clearTimeout(tRef.current); clearInterval(pRef.current); };
-  }, [cur, slides.length]);
+  }, [cur, slides.length, paused]);
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: C.bg, display: "flex", flexDirection: "column" }}>
+      {/* Preview mode banner */}
+      {isPreview && <div style={{ background: `linear-gradient(90deg, ${C.warning}, #f59e0b)`, padding: "4px 0", textAlign: "center", fontSize: 12, fontWeight: 700, color: "#000" }}>⚠️ PREVIEW MODE — This is not the live TV display</div>}
       <div style={ST.nav}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {logo ? <img src={logo} alt="Logo" style={{ height: 36, objectFit: "contain" }} /> : <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${C.accent}, #6366f1)`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: "#fff" }}>S</div>}
@@ -876,6 +952,14 @@ function TVMode({ agents, company, logo, onClose, aprilBackfill = {}, tvSettings
           <span style={{ fontSize: 13, color: C.textDim }}>Slide {cur+1}/{slides.length}</span>
           <span style={{ fontSize: 13, color: C.success, fontWeight: 600 }}>📅 {MONTH_NAMES[tvMonth]} {YEAR}</span>
           <span style={{ fontSize: 14, color: C.accent }}>{new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</span>
+          {/* Preview controls */}
+          {isPreview && (
+            <>
+              <button onClick={() => { setCur(p => (p - 1 + slides.length) % slides.length); setProg(0); }} style={{ ...ST.btnO, padding: "4px 10px", fontSize: 12 }}>⏮</button>
+              <button onClick={() => setPaused(!paused)} style={{ ...ST.btnO, padding: "4px 10px", fontSize: 12 }}>{paused ? "▶️" : "⏸"}</button>
+              <button onClick={() => { setCur(p => (p + 1) % slides.length); setProg(0); }} style={{ ...ST.btnO, padding: "4px 10px", fontSize: 12 }}>⏭</button>
+            </>
+          )}
           <button onClick={onClose} style={{ ...ST.btn(C.danger), padding: "6px 14px" }}>✕ Exit TV</button>
         </div>
       </div>
@@ -1404,7 +1488,7 @@ export default function SalesDashboard() {
   const logoRef = useRef(null);
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => { setLoggedIn(!!u); setAuthLoading(false); }); return () => u(); }, []);
-  useEffect(() => { const p = new URLSearchParams(window.location.search); if (p.get("tv") === "true") setTvMode(true); }, []);
+  useEffect(() => { const p = new URLSearchParams(window.location.search); if (p.get("tv") === "true" || p.get("tv") === "preview") setTvMode(true); }, []);
 
   // FIX: Only start Firestore listeners AFTER user is logged in
   // This prevents "Missing or insufficient permissions" errors
@@ -1596,7 +1680,7 @@ export default function SalesDashboard() {
   const today = new Date();
   const dateStr = today.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} tvSettings={tvSettings} selectedQ={selectedQ} monthlyData={monthlyData} />;
+  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} tvSettings={tvSettings} selectedQ={selectedQ} monthlyData={monthlyData} quarterWeekly={quarterWeekly} />;
 
   // ─── TV EDITS PAGE ────────────────────────────────────────────────
   const TVEdits = () => {
@@ -1808,16 +1892,28 @@ export default function SalesDashboard() {
           })}
         </div>
 
-        {/* TV Operator Link */}
+        {/* TV Operator Links */}
         <div style={{ marginTop: 20, padding: "14px 18px", background: C.card, borderRadius: 10, border: `1px solid ${C.accent}30` }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: C.accent, marginBottom: 2 }}>📎 TV Operator Link</div>
-              <div style={{ fontSize: 11, color: C.textDim }}>Send this link to the administrator to display on the TV screen</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.accent, marginBottom: 2 }}>📺 Production TV Link</div>
+                <div style={{ fontSize: 11, color: C.textDim }}>Send to the administrator — auto-cycles, auto-updates, no controls</div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, maxWidth: 500 }}>
+                <input type="text" readOnly value={`${window.location.origin}${window.location.pathname}?tv=true`} style={{ ...ST.input, fontSize: 12, flex: 1 }} onClick={e => e.target.select()} />
+                <button style={{ ...ST.btn(), padding: "10px 14px", whiteSpace: "nowrap" }} onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?tv=true`); alert("Production link copied!"); }}>📋 Copy</button>
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, maxWidth: 500 }}>
-              <input type="text" readOnly value={`${window.location.origin}${window.location.pathname}?tv=true`} style={{ ...ST.input, fontSize: 12, flex: 1 }} onClick={e => e.target.select()} />
-              <button style={{ ...ST.btn(), padding: "10px 14px", whiteSpace: "nowrap" }} onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?tv=true`); alert("Link copied!"); }}>📋 Copy</button>
+            <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.warning, marginBottom: 2 }}>👁️ Preview Link</div>
+                <div style={{ fontSize: 11, color: C.textDim }}>For your eyes only — has pause, skip, and "PREVIEW MODE" banner</div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, maxWidth: 500 }}>
+                <input type="text" readOnly value={`${window.location.origin}${window.location.pathname}?tv=preview`} style={{ ...ST.input, fontSize: 12, flex: 1 }} onClick={e => e.target.select()} />
+                <button style={{ ...ST.btn(C.warning), padding: "10px 14px", whiteSpace: "nowrap" }} onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?tv=preview`); alert("Preview link copied!"); }}>📋 Copy</button>
+              </div>
             </div>
           </div>
         </div>
