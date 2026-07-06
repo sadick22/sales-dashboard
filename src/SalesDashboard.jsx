@@ -1688,7 +1688,7 @@ export default function SalesDashboard() {
 
   // ─── TV EDITS PAGE ────────────────────────────────────────────────
   const TVEdits = () => {
-    const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ, monthlyData);
+    const allSlides = buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ, monthlyData, quarterWeekly);
     const [localSlides, setLocalSlides] = useState(allSlides);
     const [dragIdx, setDragIdx] = useState(null);
     const [editTimer, setEditTimer] = useState(null);
@@ -1696,7 +1696,7 @@ export default function SalesDashboard() {
     // Sync when allSlides change (new agents, etc.) but preserve local order/settings
     useEffect(() => {
       if (tvSettings && tvSettings.slides) {
-        setLocalSlides(buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ, monthlyData));
+        setLocalSlides(buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ, monthlyData, quarterWeekly));
       } else {
         setLocalSlides(allSlides);
       }
@@ -1731,7 +1731,7 @@ export default function SalesDashboard() {
     const resetDefaults = () => {
       if (!window.confirm("Reset all TV slide settings to default order and timers?")) return;
       saveTvSettings({});
-      setLocalSlides(buildSlideList(agents, company, aprilBackfill, null, selectedQ, monthlyData));
+      setLocalSlides(buildSlideList(agents, company, aprilBackfill, null, selectedQ, monthlyData, quarterWeekly));
     };
 
     const handleDragStart = (idx) => setDragIdx(idx);
