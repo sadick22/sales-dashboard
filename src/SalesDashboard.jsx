@@ -447,32 +447,31 @@ function TVAgent({ agent, idx, company, aprilBackfill = {}, monthlyData = {}, tv
   const exceeded = col > agent.target;
   const diff = agent.target - col;
   const ringColor = exceeded ? C.gold : c;
+  const currentQ = Math.floor(displayMonth / 3) + 1;
+  const currentQMonths = getQuarterMonths(currentQ);
   const qTarget = agent.target * 3;
-  const mb = getMonthBreakdown(agent, "collections");
-  const mbSales = getMonthBreakdown(agent, "sales");
-  const mbLeads = getMonthBreakdown(agent, "leads");
-  const aprilBf = aprilBackfill[agent.id] || {};
-  const aprilCol = aprilBf.collections || 0;
-  const aprilSales = aprilBf.sales || 0;
-  const aprilLeads = aprilBf.leads || 0;
-  const qDone = aprilCol + QUARTER_MONTHS.reduce((s, m) => s + (mb[m]||0), 0);
+  // Build quarterly breakdown dynamically for the correct quarter
+  const qBreakdown = currentQMonths.map(m => {
+    const mData = getAgentMonthData(agent, m, aprilBackfill, monthlyData, quarterWeekly);
+    return { month: MONTH_NAMES[m], col: mData.collections, sales: mData.sales, leads: mData.leads };
+  });
+  const totalCollections = qBreakdown.reduce((s, r) => s + r.col, 0);
+  const totalSales = qBreakdown.reduce((s, r) => s + r.sales, 0);
+  const totalLeads = qBreakdown.reduce((s, r) => s + r.leads, 0);
+  const qDone = totalCollections;
   const qPct = pct(qDone, qTarget);
   const qExceeded = qDone > qTarget;
-  const totalCollections = aprilCol + QUARTER_MONTHS.reduce((s, m) => s + (mb[m]||0), 0);
-  const totalSales = aprilSales + QUARTER_MONTHS.reduce((s, m) => s + (mbSales[m]||0), 0);
-  const totalLeads = aprilLeads + QUARTER_MONTHS.reduce((s, m) => s + (mbLeads[m]||0), 0);
-  // Monthly sales data for bar chart
-  const monthSalesData = [
-    { name: "Apr", value: aprilSales },
-    ...QUARTER_MONTHS.map(m => ({ name: MONTH_NAMES[m], value: mbSales[m]||0 }))
-  ];
-  // Weekly sales data for line chart
-  const weekSalesData = (agent.weeklySales||[]).map((s, i) => ({ name: LEGACY_LABELS[i], value: s.total || 0 }));
-  // Quarterly breakdown data
-  const qBreakdown = [
-    { month: "Apr", col: aprilCol, sales: aprilSales, leads: aprilLeads },
-    ...QUARTER_MONTHS.map(m => ({ month: MONTH_NAMES[m], col: mb[m]||0, sales: mbSales[m]||0, leads: mbLeads[m]||0 })),
-  ];
+  // Monthly sales data for bar chart — show current quarter's months
+  const monthSalesData = qBreakdown.map(r => ({ name: r.month, value: r.sales }));
+  // Weekly sales data for line chart — use the correct quarter's thursdays
+  const qThursdays = currentQ === 2 ? LEGACY_THURSDAYS : getQThursdays(YEAR, currentQ);
+  const qThursdayLabels = qThursdays.map(formatThursday);
+  const qKey = `q${currentQ}`;
+  const agentQData = currentQ !== 2 ? (quarterWeekly[qKey] && quarterWeekly[qKey][agent.id]) : null;
+  const weekSalesData = qThursdays.map((t, i) => {
+    const val = currentQ === 2 ? (((agent.weeklySales||[])[i]||{}).total||0) : (((agentQData?.sales||[])[i]||{}).total||0);
+    return { name: qThursdayLabels[i], value: val };
+  });
 
   return (
     <div style={{ width: "100%", maxWidth: 1400, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
@@ -508,7 +507,7 @@ function TVAgent({ agent, idx, company, aprilBackfill = {}, monthlyData = {}, tv
         </div>
         {/* Quarterly breakdown table */}
         <div style={{ background: C.cardAlt, borderRadius: 10, padding: 12, width: "100%", maxWidth: 320, border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8, textAlign: "center" }}>Q2 quarterly breakdown</div>
+          <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8, textAlign: "center" }}>Q{currentQ} quarterly breakdown</div>
           <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
             <thead><tr>
               <th style={{ textAlign: "left", padding: "3px 0", color: C.textDim, fontWeight: 600 }}></th>
@@ -536,7 +535,7 @@ function TVAgent({ agent, idx, company, aprilBackfill = {}, monthlyData = {}, tv
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 20, justifyContent: "center" }}>
-        <div style={ST.card}><div style={{ ...ST.title, color: C.success }}>Q2 monthly sales</div>
+        <div style={ST.card}><div style={{ ...ST.title, color: C.success }}>Q{currentQ} monthly sales</div>
           <ResponsiveContainer width="100%" height={180}><BarChart data={monthSalesData}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="name" stroke={C.textDim} fontSize={12} /><YAxis stroke={C.textDim} fontSize={12} /><Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} /><Bar dataKey="value" fill={C.success} name="Sales" radius={[6,6,0,0]} /></BarChart></ResponsiveContainer>
         </div>
         <div style={ST.card}><div style={{ ...ST.title, color: C.success }}>Weekly sales</div>
@@ -663,7 +662,7 @@ function buildSlideList(agents, company, aprilBackfill, tvSettings, selectedQ = 
     { id: "weekly", name: "Weekly breakdown", icon: "📅", type: "fixed", defaultDur: 15000, comp: <TVWeekly agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} quarterWeekly={quarterWeekly} /> },
     ...activeAgents.map((a, i) => ({ id: `agent_${a.id}`, name: a.name, icon: "", image: a.image, type: "agent", defaultDur: 10000, comp: <TVAgent agent={a} idx={i} company={company} aprilBackfill={aprilBackfill} monthlyData={monthlyData} tvDisplayMonth={tvMonth} quarterWeekly={quarterWeekly} /> })),
     { id: "podium", name: "Top performers", icon: "🏆", type: "fixed", defaultDur: 15000, comp: <TVPodium agents={tvAgents} tvDisplayMonth={tvMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} quarterWeekly={quarterWeekly} /> },
-    { id: "agentOfMonth", name: "Agent of the month", icon: "👑", type: "fixed", defaultDur: 20000, comp: <TVAgentOfMonth agents={allAgents} tvDisplayMonth={prevMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} quarterWeekly={quarterWeekly} /> },
+    { id: "agentOfMonth", name: "Agent of the month", icon: "👑", type: "fixed", defaultDur: 20000, comp: <TVAgentOfMonth agents={tvAgents} tvDisplayMonth={prevMonth} aprilBackfill={aprilBackfill} monthlyData={monthlyData} quarterWeekly={quarterWeekly} /> },
   ];
 
   if (!tvSettings || !tvSettings.slides) return allSlides.map(s => ({ ...s, visible: true, dur: s.defaultDur }));
@@ -710,9 +709,11 @@ function TVLiveRankings({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyDat
     <div style={{ width: "100%", maxWidth: 1400, textAlign: "center" }}>
       <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 6, color: C.accent }}>📊 Live Rankings — {MONTH_NAMES[displayMonth]} {YEAR}</h2>
       <p style={{ fontSize: 13, color: C.textDim, marginBottom: 24 }}>Ranked by sales · Updated in real-time</p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, textAlign: "left" }}>
-        {sorted.map((a, i) => {
-          const rank = i + 1;
+      {(() => {
+        const half = Math.ceil(sorted.length / 2);
+        const leftCol = sorted.slice(0, half);
+        const rightCol = sorted.slice(half);
+        const renderRow = (a, rank) => {
           const prevRank = prevRankMap[a.id] || rank;
           const moved = prevRank - rank;
           const moveColor = moved > 0 ? C.success : moved < 0 ? C.danger : C.textDim;
@@ -721,13 +722,13 @@ function TVLiveRankings({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyDat
           const isTop3 = rank <= 3;
           const borderColor = rank === 1 ? C.gold : rank === 2 ? "#94a3b8" : rank === 3 ? "#cd7f32" : C.border;
           return (
-            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10, background: isTop3 ? `${borderColor}12` : "rgba(255,255,255,0.02)", borderLeft: `3px solid ${borderColor}`, marginBottom: 2 }}>
+            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10, background: isTop3 ? `${borderColor}12` : "rgba(255,255,255,0.02)", borderLeft: `3px solid ${borderColor}`, marginBottom: 6 }}>
               <div style={{ width: 28, height: 28, borderRadius: 8, background: isTop3 ? `${borderColor}30` : C.cardAlt, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, color: isTop3 ? borderColor : C.textDim, flexShrink: 0 }}>{rank}</div>
               <div style={{ width: 32, textAlign: "center", flexShrink: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: moveColor }}>{moveIcon}</div>
                 <div style={{ fontSize: 9, color: moveColor }}>{moveText}</div>
               </div>
-              {a.image ? <img src={a.image} alt={a.name} style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} /> : <div style={{ ...ST.av(tri(i)), width: 36, height: 36, fontSize: 13, flexShrink: 0 }}>{initials(a.name)}</div>}
+              {a.image ? <img src={a.image} alt={a.name} style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} /> : <div style={{ ...ST.av(tri(rank-1)), width: 36, height: 36, fontSize: 13, flexShrink: 0 }}>{initials(a.name)}</div>}
               <span style={{ flex: 1, fontWeight: 600, fontSize: 14, color: "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
               <div style={{ textAlign: "right", flexShrink: 0 }}>
                 <div style={{ fontSize: 16, fontWeight: 800, color: C.success }}>{fmt(a.sales)}</div>
@@ -739,8 +740,14 @@ function TVLiveRankings({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyDat
               </div>
             </div>
           );
-        })}
-      </div>
+        };
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, textAlign: "left" }}>
+            <div>{leftCol.map((a, i) => renderRow(a, i + 1))}</div>
+            <div>{rightCol.map((a, i) => renderRow(a, half + i + 1))}</div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
