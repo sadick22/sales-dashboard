@@ -425,21 +425,21 @@ function AgentCard({ agent, idx, aprilBackfill = {}, selectedMonth, monthlyData 
 }
 
 // ─── TV SLIDES ─────────────────────────────────────────────────────
-function TVAll({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {} }) {
+function TVAll({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {}, quarterWeekly = {} }) {
   const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
   const withMonthData = agents.map(a => {
-    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData);
+    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData, quarterWeekly);
     return { ...a, _monthCol: md.collections, _monthSales: md.sales, _monthLeads: md.leads };
   });
   const sorted = [...withMonthData].sort((a, b) => b._monthCol - a._monthCol);
   return (<div style={{ width: "100%", maxWidth: 1600 }}><h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, textAlign: "center", color: C.accent }}>📊 Agent Performance — {MONTH_NAMES[displayMonth]} {YEAR}</h2><div style={ST.grid(3)}>{sorted.map((a, i) => <AgentCard key={a.id} agent={a} idx={i} aprilBackfill={aprilBackfill} selectedMonth={displayMonth} monthlyData={monthlyData} />)}</div></div>);
 }
 
-function TVAgent({ agent, idx, company, aprilBackfill = {}, monthlyData = {}, tvDisplayMonth }) {
+function TVAgent({ agent, idx, company, aprilBackfill = {}, monthlyData = {}, tvDisplayMonth, quarterWeekly = {} }) {
   const c = tri(idx);
   const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
   // Get the SELECTED MONTH's data for big display
-  const md = getAgentMonthData(agent, displayMonth, aprilBackfill, monthlyData);
+  const md = getAgentMonthData(agent, displayMonth, aprilBackfill, monthlyData, quarterWeekly);
   const col = md.collections;
   const sales = md.sales;
   const leads = md.leads;
@@ -549,9 +549,9 @@ function TVAgent({ agent, idx, company, aprilBackfill = {}, monthlyData = {}, tv
   );
 }
 
-function TVCompany({ company, agents, aprilBackfill = {}, selectedQ = 2 }) {
-  const total = getQuarterTotal(agents, selectedQ, aprilBackfill);
-  const pipeline = calcPipeline(agents, selectedQ, aprilBackfill);
+function TVCompany({ company, agents, aprilBackfill = {}, selectedQ = 2, monthlyData = {}, quarterWeekly = {} }) {
+  const total = getQuarterTotal(agents, selectedQ, aprilBackfill, monthlyData, quarterWeekly);
+  const pipeline = calcPipeline(agents, selectedQ, aprilBackfill, monthlyData, quarterWeekly);
   const qTarget = getQuarterTarget(company, selectedQ);
   const qPctVal = pct(total, qTarget);
   const qMonths = getQuarterMonths(selectedQ);
@@ -579,12 +579,13 @@ function TVCompany({ company, agents, aprilBackfill = {}, selectedQ = 2 }) {
   );
 }
 
-function TVWeekly({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {} }) {
+function TVWeekly({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {}, quarterWeekly = {} }) {
   const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
-  const monthTh = getMonthThursdays(displayMonth);
-  const isMonthlyOnly = displayMonth === 3 || monthTh.indices.length === 0; // April or months without weekly data
+  const q = Math.floor(displayMonth / 3) + 1;
+  const monthTh = getMonthThursdays(displayMonth, q);
+  const isMonthlyOnly = monthTh.indices.length === 0;
   const withMonthData = agents.map(a => {
-    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData);
+    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData, quarterWeekly);
     return { ...a, _monthCol: md.collections, _monthSales: md.sales };
   });
   const sorted = [...withMonthData].sort((a, b) => b._monthCol - a._monthCol);
@@ -614,8 +615,11 @@ function TVWeekly({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {}
         <thead><tr><th style={ST.th}>Agent</th>{monthTh.labels.map(w => <th key={w} style={{ ...ST.th, textAlign: "right" }}>{w}</th>)}<th style={{ ...ST.th, textAlign: "right" }}>Total</th></tr></thead>
         <tbody>{sorted.map((a, i) => {
           let total = 0; const c = tri(i);
+          const isQ2 = q === 2;
+          const qKey = `q${q}`;
+          const qData = !isQ2 ? (quarterWeekly[qKey] && quarterWeekly[qKey][a.id]) : null;
           return (<tr key={a.id}><td style={{ ...ST.td, borderRadius: "8px 0 0 8px", fontWeight: 600, color: "#f1f5f9" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: c, marginRight: 8 }} />{a.name}</td>
-            {monthTh.indices.map(j => { const v = (a.weeklyCollections||[])[j]||0; total += v; return <td key={j} style={{ ...ST.td, textAlign: "right" }}>{v > 0 ? fmt(v) : <span style={{ color: C.textDim }}>—</span>}</td>; })}
+            {monthTh.indices.map(j => { const v = isQ2 ? ((a.weeklyCollections||[])[j]||0) : ((qData?.collections||[])[j]||0); total += v; return <td key={j} style={{ ...ST.td, textAlign: "right" }}>{v > 0 ? fmt(v) : <span style={{ color: C.textDim }}>—</span>}</td>; })}
             <td style={{ ...ST.td, borderRadius: "0 8px 8px 0", textAlign: "right", fontWeight: 700, color: c }}>{fmt(total)}</td></tr>);
         })}</tbody>
       </table>
@@ -742,10 +746,10 @@ function TVLiveRankings({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyDat
 }
 
 // ─── TV PODIUM (Top 3 Leaderboard) ─────────────────────────────────
-function TVPodium({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {} }) {
+function TVPodium({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {}, quarterWeekly = {} }) {
   const displayMonth = tvDisplayMonth !== undefined ? tvDisplayMonth : new Date().getMonth();
   const withMonthData = agents.map(a => {
-    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData);
+    const md = getAgentMonthData(a, displayMonth, aprilBackfill, monthlyData, quarterWeekly);
     return { ...a, _mSales: md.sales, _mCol: md.collections };
   });
   const sorted = [...withMonthData].sort((a, b) => b._mSales - a._mSales);
