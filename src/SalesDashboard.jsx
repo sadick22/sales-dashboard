@@ -1222,15 +1222,16 @@ function PipelineViewModal({ agents, aprilBackfill = {}, selectedQ = 2, onClose 
 }
 
 // ─── MODAL: MONTHLY INPUT ──────────────────────────────────────────
-function MonthlyInputModal({ agents, monthIdx, monthlyData, aprilBackfill, onSave, onClose }) {
+function MonthlyInputModal({ agents, monthIdx, monthlyData, aprilBackfill, quarterWeekly = {}, onSave, onClose }) {
   const [activeMonth, setActiveMonth] = useState(monthIdx);
   const monthName = MONTH_NAMES[activeMonth];
-  const allQuarterMonths = [3, 4, 5]; // Apr, May, Jun for Q2
+  const activeQ = Math.floor(activeMonth / 3) + 1;
+  const allQuarterMonths = getQuarterMonths(activeQ);
 
   const [data, setData] = useState(() => {
     const d = {};
     agents.forEach(a => {
-      const existing = getAgentMonthData(a, activeMonth, aprilBackfill, monthlyData);
+      const existing = getAgentMonthData(a, activeMonth, aprilBackfill, monthlyData, quarterWeekly);
       d[a.id] = { collections: existing.collections, sales: existing.sales, leads: existing.leads };
     });
     return d;
@@ -1241,7 +1242,7 @@ function MonthlyInputModal({ agents, monthIdx, monthlyData, aprilBackfill, onSav
     setActiveMonth(m);
     const d = {};
     agents.forEach(a => {
-      const existing = getAgentMonthData(a, m, aprilBackfill, monthlyData);
+      const existing = getAgentMonthData(a, m, aprilBackfill, monthlyData, quarterWeekly);
       d[a.id] = { collections: existing.collections, sales: existing.sales, leads: existing.leads };
     });
     setData(d);
@@ -2343,7 +2344,7 @@ export default function SalesDashboard() {
       {modal?.type === "collsales" && <WeeklyCollSalesModal agents={agentsWithImages} selectedQ={selectedQ} quarterWeekly={quarterWeekly} onSave={handleCollSalesSave} onClose={() => setModal(null)} />}
       {modal?.type === "pipeline" && <PipelineViewModal agents={agentsWithImages} aprilBackfill={aprilBackfill} selectedQ={selectedQ} onClose={() => setModal(null)} />}
       {modal?.type === "aprilBackfill" && <AprilBackfillModal agents={agentsWithImages} aprilBackfill={aprilBackfill} onSave={(data) => { saveAprilBackfill(data); setModal(null); }} onClose={() => setModal(null)} />}
-      {modal?.type === "monthlyInput" && <MonthlyInputModal agents={agentsWithImages} monthIdx={selectedMonth} monthlyData={monthlyData} aprilBackfill={aprilBackfill} onSave={(data) => { saveMonthlyData(data); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === "monthlyInput" && <MonthlyInputModal agents={agentsWithImages} monthIdx={selectedMonth} monthlyData={monthlyData} aprilBackfill={aprilBackfill} quarterWeekly={quarterWeekly} onSave={(data) => { saveMonthlyData(data); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === "agent" && <AgentModal agent={modal.agent} onSave={handleAgentSave} onClose={() => setModal(null)} />}
       {/* Preview single slide */}
       {previewSlide && (
