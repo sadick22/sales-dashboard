@@ -1496,6 +1496,7 @@ export default function SalesDashboard() {
   const [tvDisplayMonth, setTvDisplayMonth] = useState(5);
   const [dragAgent, setDragAgent] = useState(null);
   const [quarterWeekly, setQuarterWeekly] = useState({});
+  const [agentImages, setAgentImages] = useState({});
   const logoRef = useRef(null);
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => { setLoggedIn(!!u); setAuthLoading(false); }); return () => u(); }, []);
@@ -1511,19 +1512,45 @@ export default function SalesDashboard() {
     const unsubs = [
       onSnapshot(doc(db, "dashboard", "agents"), async (snap) => {
         if (snap.exists()) {
-          const list = snap.data().list.map(a => ({
-            ...a,
-            hideFromTV: a.hideFromTV || false,
-            weeklyLeads: a.weeklyLeads || makeEmptyWeeks(),
-            weeklyCollections: a.weeklyCollections || makeEmptyWeeks(),
-            weeklySales: a.weeklySales || makeEmptySales(),
-          }));
+          const raw = snap.data().list;
+          // Check if any agents have images stored inline (old format) — migrate them
+          const imagesToMigrate = {};
+          let needsMigration = false;
+          const list = raw.map(a => {
+            if (a.image && a.image.length > 100) {
+              // This is a Base64 image — needs migration
+              imagesToMigrate[a.id] = a.image;
+              needsMigration = true;
+            }
+            return {
+              ...a,
+              image: "", // Always clear image from agent data — images live in agentImages doc
+              hideFromTV: a.hideFromTV || false,
+              weeklyLeads: a.weeklyLeads || makeEmptyWeeks(),
+              weeklyCollections: a.weeklyCollections || makeEmptyWeeks(),
+              weeklySales: a.weeklySales || makeEmptySales(),
+            };
+          });
           setAgents(list);
+          // Migrate images if found
+          if (needsMigration) {
+            try {
+              // Save images to separate document
+              const existingImages = (await import("firebase/firestore")).getDoc ? agentImages : {};
+              const mergedImages = { ...existingImages, ...imagesToMigrate };
+              await setDoc(doc(db, "dashboard", "agentImages"), mergedImages);
+              // Save agents WITHOUT images to keep document small
+              await setDoc(doc(db, "dashboard", "agents"), { list: list });
+              console.log("Migrated", Object.keys(imagesToMigrate).length, "agent images to separate storage");
+            } catch(e) { console.error("Image migration error:", e); }
+          }
         } else if (!initialLoadDone) {
-          // First time: no data in Firestore, save defaults
           try { await setDoc(doc(db, "dashboard", "agents"), { list: DEFAULT_AGENTS }); } catch(e) { console.error("Init agents:", e); }
         }
         if (!initialLoadDone) { initialLoadDone = true; setDataLoaded(true); }
+      }),
+      onSnapshot(doc(db, "dashboard", "agentImages"), (snap) => {
+        if (snap.exists()) setAgentImages(snap.data());
       }),
       onSnapshot(doc(db, "dashboard", "company"), async (snap) => {
         if (snap.exists()) {
@@ -1556,13 +1583,36 @@ export default function SalesDashboard() {
     setAgents(a);
     setSaving(true);
     try {
-      await setDoc(doc(db, "dashboard", "agents"), { list: a });
+      // Strip images from agent data to keep document small (images stored separately)
+      const stripped = a.map(agent => ({ ...agent, image: "" }));
+      await setDoc(doc(db, "dashboard", "agents"), { list: stripped });
       console.log("Agents saved successfully");
     } catch(e) {
       console.error("Save agents error:", e);
-      alert("Failed to save. Please check your connection and try again.");
+      alert("⚠️ CRITICAL: Failed to save agent data!\n\nError: " + e.message + "\n\nPlease screenshot this and contact Sadiq immediately.");
     }
     setSaving(false);
+  };
+
+  const saveAgentImage = async (agentId, imageData) => {
+    try {
+      const updated = { ...agentImages, [agentId]: imageData };
+      await setDoc(doc(db, "dashboard", "agentImages"), updated);
+      setAgentImages(updated);
+      console.log("Agent image saved separately for:", agentId);
+    } catch(e) {
+      console.error("Save agent image error:", e);
+      alert("Failed to save agent image. The image may be too large.");
+    }
+  };
+
+  const removeAgentImage = async (agentId) => {
+    const updated = { ...agentImages };
+    delete updated[agentId];
+    try {
+      await setDoc(doc(db, "dashboard", "agentImages"), updated);
+      setAgentImages(updated);
+    } catch(e) { console.error("Remove image error:", e); }
   };
   const saveCompany = async (c) => {
     setCompany(c);
@@ -1664,12 +1714,32 @@ export default function SalesDashboard() {
 
   const handleAgentSave = (form) => {
     let n;
-    if (form.id) { n = agents.map(a => a.id === form.id ? { ...a, name: form.name, image: form.image, target: form.target, hideFromTV: form.hideFromTV || false } : a); }
-    else { n = [...agents, { ...form, id: `a${Date.now()}`, target: form.target||40000, hideFromTV: form.hideFromTV || false, weeklyLeads: makeEmptyWeeks(), weeklyCollections: makeEmptyWeeks(), weeklySales: makeEmptySales() }]; }
+    const imageData = form.image || "";
+    if (form.id) {
+      n = agents.map(a => a.id === form.id ? { ...a, name: form.name, image: "", target: form.target, hideFromTV: form.hideFromTV || false } : a);
+      // Save image separately if provided
+      if (imageData) saveAgentImage(form.id, imageData);
+      else if (agentImages[form.id] && !imageData) removeAgentImage(form.id);
+    } else {
+      const newId = `a${Date.now()}`;
+      n = [...agents, { ...form, id: newId, image: "", target: form.target||40000, hideFromTV: form.hideFromTV || false, weeklyLeads: makeEmptyWeeks(), weeklyCollections: makeEmptyWeeks(), weeklySales: makeEmptySales() }];
+      if (imageData) saveAgentImage(newId, imageData);
+    }
     saveAgents(n); setModal(null);
   };
 
-  const handleDeleteAgent = (id) => { if (window.confirm("Remove this agent?")) saveAgents(agents.filter(a => a.id !== id)); };
+  const handleDeleteAgent = (id) => {
+    if (window.confirm("Remove this agent?")) {
+      saveAgents(agents.filter(a => a.id !== id));
+      removeAgentImage(id);
+    }
+  };
+
+  // Merge agent images from separate storage into agent objects for rendering
+  const agentsWithImages = useMemo(() => agents.map(a => ({
+    ...a,
+    image: agentImages[a.id] || a.image || "",
+  })), [agents, agentImages]);
 
   // FIX: Show loading only while checking auth status
   if (authLoading) return (<div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ textAlign: "center" }}><div style={{ width: 60, height: 60, borderRadius: 14, background: `linear-gradient(135deg, ${C.accent}, #6366f1)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: "#fff", marginBottom: 16 }}>S</div><div style={{ color: C.textDim, fontSize: 14 }}>Loading...</div></div></div>);
@@ -1681,17 +1751,17 @@ export default function SalesDashboard() {
   if (!dataLoaded) return (<div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ textAlign: "center" }}><div style={{ width: 60, height: 60, borderRadius: 14, background: `linear-gradient(135deg, ${C.accent}, #6366f1)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: "#fff", marginBottom: 16 }}>S</div><div style={{ color: C.textDim, fontSize: 14 }}>Loading dashboard data...</div></div></div>);
 
   const qTarget = getQuarterTarget(company, selectedQ);
-  const totalCol = getQuarterTotal(agents, selectedQ, aprilBackfill, monthlyData, quarterWeekly);
+  const totalCol = getQuarterTotal(agentsWithImages, selectedQ, aprilBackfill, monthlyData, quarterWeekly);
   const qPct = pct(totalCol, qTarget);
-  const pipeline = calcPipeline(agents, selectedQ, aprilBackfill, monthlyData, quarterWeekly);
+  const pipeline = calcPipeline(agentsWithImages, selectedQ, aprilBackfill, monthlyData, quarterWeekly);
   const qMonths = getQuarterMonths(selectedQ);
   const qThursdays = selectedQ === 2 ? LEGACY_THURSDAYS : getQThursdays(YEAR, selectedQ);
   const qThursdayLabels = qThursdays.map(formatThursday);
-  const sorted = [...agents].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
+  const sorted = [...agentsWithImages].sort((a, b) => getMonthlyCollection(b) - getMonthlyCollection(a));
   const today = new Date();
   const dateStr = today.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-  if (tvMode) return <TVMode agents={agents} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} tvSettings={tvSettings} selectedQ={selectedQ} monthlyData={monthlyData} quarterWeekly={quarterWeekly} />;
+  if (tvMode) return <TVMode agents={agentsWithImages} company={company} logo={logo} onClose={() => setTvMode(false)} aprilBackfill={aprilBackfill} tvSettings={tvSettings} selectedQ={selectedQ} monthlyData={monthlyData} quarterWeekly={quarterWeekly} />;
 
   // ─── TV EDITS PAGE ────────────────────────────────────────────────
   const TVEdits = () => {
@@ -1964,7 +2034,7 @@ export default function SalesDashboard() {
     const isCurrentMonth = selectedMonth === currentMonth;
 
     // Get month-specific data for each agent
-    const agentMonthData = agents.map(a => {
+    const agentMonthData = agentsWithImages.map(a => {
       const md = getAgentMonthData(a, selectedMonth, aprilBackfill, monthlyData, quarterWeekly);
       return { ...a, monthCol: md.collections, monthSales: md.sales, monthLeads: md.leads, monthSource: md.source };
     });
@@ -2191,7 +2261,7 @@ export default function SalesDashboard() {
       <div style={{ ...ST.grid(2), marginBottom: 20 }}>
         <div style={ST.card}>
           <div style={{ ...ST.title, justifyContent: "space-between" }}><span>👥 Agent Management</span><div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 11, color: C.textDim, alignSelf: "center" }}>↕ Drag or use arrows to reorder</span><button style={ST.btn()} onClick={() => setModal({ type: "agent" })}>+ Add Agent</button></div></div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{agents.map((a, i) => (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{agentsWithImages.map((a, i) => (
             <div key={a.id} draggable
               onDragStart={() => setDragAgent(i)}
               onDragOver={e => e.preventDefault()}
@@ -2269,11 +2339,11 @@ export default function SalesDashboard() {
         </div>
       </nav>
       {page === "dashboard" ? <Dash /> : page === "tvEdits" ? <TVEdits /> : <Settings />}
-      {modal?.type === "leads" && <WeeklyLeadsModal agents={agents} selectedQ={selectedQ} quarterWeekly={quarterWeekly} onSave={handleWeeklyLeadsSave} onClose={() => setModal(null)} />}
-      {modal?.type === "collsales" && <WeeklyCollSalesModal agents={agents} selectedQ={selectedQ} quarterWeekly={quarterWeekly} onSave={handleCollSalesSave} onClose={() => setModal(null)} />}
-      {modal?.type === "pipeline" && <PipelineViewModal agents={agents} aprilBackfill={aprilBackfill} selectedQ={selectedQ} onClose={() => setModal(null)} />}
-      {modal?.type === "aprilBackfill" && <AprilBackfillModal agents={agents} aprilBackfill={aprilBackfill} onSave={(data) => { saveAprilBackfill(data); setModal(null); }} onClose={() => setModal(null)} />}
-      {modal?.type === "monthlyInput" && <MonthlyInputModal agents={agents} monthIdx={selectedMonth} monthlyData={monthlyData} aprilBackfill={aprilBackfill} onSave={(data) => { saveMonthlyData(data); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === "leads" && <WeeklyLeadsModal agents={agentsWithImages} selectedQ={selectedQ} quarterWeekly={quarterWeekly} onSave={handleWeeklyLeadsSave} onClose={() => setModal(null)} />}
+      {modal?.type === "collsales" && <WeeklyCollSalesModal agents={agentsWithImages} selectedQ={selectedQ} quarterWeekly={quarterWeekly} onSave={handleCollSalesSave} onClose={() => setModal(null)} />}
+      {modal?.type === "pipeline" && <PipelineViewModal agents={agentsWithImages} aprilBackfill={aprilBackfill} selectedQ={selectedQ} onClose={() => setModal(null)} />}
+      {modal?.type === "aprilBackfill" && <AprilBackfillModal agents={agentsWithImages} aprilBackfill={aprilBackfill} onSave={(data) => { saveAprilBackfill(data); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === "monthlyInput" && <MonthlyInputModal agents={agentsWithImages} monthIdx={selectedMonth} monthlyData={monthlyData} aprilBackfill={aprilBackfill} onSave={(data) => { saveMonthlyData(data); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === "agent" && <AgentModal agent={modal.agent} onSave={handleAgentSave} onClose={() => setModal(null)} />}
       {/* Preview single slide */}
       {previewSlide && (
