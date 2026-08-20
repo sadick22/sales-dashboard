@@ -285,22 +285,17 @@ const getQuarterDone = (company, q) => {
 };
 
 // ─── MONTH-SPECIFIC HELPERS ────────────────────────────────────────
-// Get agent's data for a specific month from weekly arrays + monthly overrides + april backfill
+// Resolve an agent's totals for a month. WEEKLY IS THE SOURCE OF TRUTH: whenever
+// weekly data is being tracked for the month, its summed total is used. The
+// monthly override and April backfill apply ONLY as fallbacks for months that
+// have no weekly data (e.g. April). This means the Monthly Data Entry screen can
+// no longer silently shadow entered weekly figures.
 const getAgentMonthData = (agent, monthIdx, aprilBackfill = {}, monthlyData = {}, quarterWeekly = {}) => {
-  // Check monthly overrides first
-  const mKey = `m${monthIdx}`;
-  const override = monthlyData[mKey] && monthlyData[mKey][agent.id];
-  if (override) return { collections: override.collections || 0, sales: override.sales || 0, leads: override.leads || 0, source: "monthly" };
+  // 1) Sum the weekly data for this month, if any is tracked.
+  let collections = 0, sales = 0, leads = 0, hasWeekly = false;
 
-  // April uses backfill
-  if (monthIdx === 3) {
-    const bf = aprilBackfill[agent.id] || {};
-    return { collections: bf.collections || 0, sales: bf.sales || 0, leads: bf.leads || 0, source: "backfill" };
-  }
-
-  // May/June (Q2): derive from legacy weekly data on agents
   if (monthIdx === 4 || monthIdx === 5) {
-    let collections = 0, sales = 0, leads = 0;
+    // May/June (Q2): legacy weekly arrays live on the agent record.
     LEGACY_THURSDAYS.forEach((t, i) => {
       if (t.getMonth() === monthIdx) {
         collections += weekValue((agent.weeklyCollections || [])[i]);
@@ -308,25 +303,36 @@ const getAgentMonthData = (agent, monthIdx, aprilBackfill = {}, monthlyData = {}
         leads += (agent.weeklyLeads || [])[i] || 0;
       }
     });
-    return { collections, sales, leads, source: "weekly" };
+    hasWeekly = true;
+  } else if (monthIdx !== 3) {
+    // Any other quarter: per-quarter weekly data.
+    const q = Math.floor(monthIdx / 3) + 1;
+    const qData = quarterWeekly[`q${q}`] && quarterWeekly[`q${q}`][agent.id];
+    if (qData) {
+      getQThursdays(YEAR, q).forEach((t, i) => {
+        if (t.getMonth() === monthIdx) {
+          collections += weekValue((qData.collections || [])[i]);
+          sales += ((qData.sales || [])[i] || {}).total || 0;
+          leads += (qData.leads || [])[i] || 0;
+        }
+      });
+      hasWeekly = true;
+    }
   }
 
-  // Other quarters: derive from quarterWeekly data
-  const q = Math.floor(monthIdx / 3) + 1;
-  const qKey = `q${q}`;
-  const qData = quarterWeekly[qKey] && quarterWeekly[qKey][agent.id];
-  if (!qData) return { collections: 0, sales: 0, leads: 0, source: "none" };
+  // 2) Weekly wins whenever it is tracked for this month.
+  if (hasWeekly) return { collections, sales, leads, source: "weekly" };
 
-  const qThursdays = getQThursdays(YEAR, q);
-  let collections = 0, sales = 0, leads = 0;
-  qThursdays.forEach((t, i) => {
-    if (t.getMonth() === monthIdx) {
-      collections += weekValue((qData.collections || [])[i]);
-      sales += ((qData.sales || [])[i] || {}).total || 0;
-      leads += (qData.leads || [])[i] || 0;
-    }
-  });
-  return { collections, sales, leads, source: "weekly" };
+  // 3) Fallbacks for months with no weekly data:
+  const override = monthlyData[`m${monthIdx}`] && monthlyData[`m${monthIdx}`][agent.id];
+  if (override) return { collections: override.collections || 0, sales: override.sales || 0, leads: override.leads || 0, source: "monthly" };
+
+  if (monthIdx === 3) {
+    const bf = aprilBackfill[agent.id] || {};
+    return { collections: bf.collections || 0, sales: bf.sales || 0, leads: bf.leads || 0, source: "backfill" };
+  }
+
+  return { collections: 0, sales: 0, leads: 0, source: "none" };
 };
 
 // Get Thursdays within a specific month (supports Q2 legacy + other quarters)
