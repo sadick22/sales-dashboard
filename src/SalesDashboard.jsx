@@ -162,17 +162,20 @@ const isMonthStart = (thursdays, i) =>
   thursdays[i].getFullYear() !== thursdays[i - 1].getFullYear();
 
 // MIGRATION / NORMALIZATION: turn any weekly series (numbers or objects) into a
-// clean month-scoped { prev, current, total } chain. Each week's delta (total)
-// is preserved EXACTLY, so no reported figure changes — only `current`/`prev`
-// are (re)derived so the odometer resets each month. Idempotent.
+// clean month-scoped chain. Each week's delta (total) is preserved EXACTLY, so no
+// reported figure changes. `prev` holds the running cumulative carried INTO the
+// week; `current` holds the cumulative reading for weeks that were actually
+// entered (delta ≠ 0), and is null for un-entered weeks so their input box shows
+// blank and is safely treated as "no change". Idempotent.
 const chainFromDeltas = (series, thursdays) => {
   const out = [];
   let running = 0;
   for (let i = 0; i < thursdays.length; i++) {
     if (isMonthStart(thursdays, i)) running = 0;
     const delta = weekValue(series[i]);
-    out.push({ prev: running, current: running + delta, total: delta });
+    const prev = running;
     running += delta;
+    out.push({ prev, current: delta !== 0 ? running : null, total: delta });
   }
   return out;
 };
@@ -1130,32 +1133,42 @@ function WeeklyCollSalesModal({ agents, selectedQ, quarterWeekly, onSave, onClos
   }));
   const [wi, setWi] = useState(getCurrentWeekIndex(thursdays));
 
-  // Cumulative odometer — resets to 0 at the start of every calendar month.
-  const getAutoPrev = (arr, weekIdx) => {
-    if (isMonthStart(thursdays, weekIdx)) return 0;
-    return arr[weekIdx - 1]?.current || 0;
+  // Rebuild a field's whole chain: walk each month, carrying the running
+  // cumulative. A week with an entered value sets a signed delta and advances the
+  // running total; a blank week (current == null/"") means "no change" → delta 0,
+  // running unchanged. This keeps un-entered agents/weeks safe (never negative)
+  // and keeps later weeks correct when an earlier one is edited.
+  const rechain = (arr) => {
+    const out = [];
+    let running = 0;
+    for (let j = 0; j < arr.length; j++) {
+      if (isMonthStart(thursdays, j)) running = 0;
+      const raw = arr[j] ? arr[j].current : null;
+      const entered = raw !== null && raw !== undefined && raw !== "";
+      if (entered) {
+        const c = Number(raw) || 0;
+        out.push({ prev: running, current: c, total: c - running });
+        running = c;
+      } else {
+        out.push({ prev: running, current: null, total: 0 });
+      }
+    }
+    return out;
   };
 
+  // The cumulative carried into a week (its "previous" reading) is stored on prev.
+  const getAutoPrev = (arr, weekIdx) => arr[weekIdx]?.prev || 0;
+
   // One handler for both panels. field = "weeklyCollections" | "weeklySales".
+  // Empty box → null (no change); any number (incl. negative) → entered value.
   const handleCurrentChange = (id, field, val) => {
     setData(prev => prev.map(d => {
       if (d.id !== id) return d;
-      const arr = d[field].map((s, j) => {
-        if (j !== wi) return s;
-        const current = Number(val) || 0;
-        const prevVal = getAutoPrev(d[field], wi);
-        return { prev: prevVal, current, total: current - prevVal }; // signed — no floor
-      });
-      return { ...d, [field]: arr };
+      const next = d[field].map((s, j) =>
+        j === wi ? { ...s, current: val === "" ? null : (Number(val) || 0) } : s);
+      return { ...d, [field]: rechain(next) };
     }));
   };
-
-  // Rebuild a full chain from its current values (month reset + signed delta).
-  const rechain = (arr) => arr.map((s, j) => {
-    const prevVal = isMonthStart(thursdays, j) ? 0 : (arr[j - 1]?.current || 0);
-    const current = s.current || 0;
-    return { prev: prevVal, current, total: current - prevVal };
-  });
 
   const handleSave = () => {
     const fixed = data.map(d => ({
@@ -1166,7 +1179,7 @@ function WeeklyCollSalesModal({ agents, selectedQ, quarterWeekly, onSave, onClos
     onSave(fixed, selectedQ);
   };
 
-  const weekDelta = (arr) => (arr[wi]?.current || 0) - getAutoPrev(arr, wi);
+  const weekDelta = (arr) => (arr[wi] ? arr[wi].total || 0 : 0);
   const totalCol = data.reduce((s, d) => s + weekDelta(d.weeklyCollections), 0);
   const totalSales = data.reduce((s, d) => s + weekDelta(d.weeklySales), 0);
 
@@ -1199,14 +1212,15 @@ function WeeklyCollSalesModal({ agents, selectedQ, quarterWeekly, onSave, onClos
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {data.map(d => {
               const autoPrev = getAutoPrev(d.weeklyCollections, wi);
-              const currentVal = d.weeklyCollections[wi]?.current || 0;
-              const totalVal = currentVal - autoPrev;
+              const cur = d.weeklyCollections[wi] ? d.weeklyCollections[wi].current : null;
+              const entered = cur !== null && cur !== undefined;
+              const totalVal = d.weeklyCollections[wi] ? (d.weeklyCollections[wi].total || 0) : 0;
               return (
                 <div key={d.id} style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr 1fr", gap: 4, alignItems: "center" }}>
                   <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{d.name}</span>
                   <input type="text" style={ST.inputDisabled} value={fmt(autoPrev)} readOnly title={`Auto-filled from ${prevHeader}`} />
-                  <input type="number" style={ST.inputSm} value={currentVal || ""} placeholder="0" onChange={e => handleCurrentChange(d.id, "weeklyCollections", e.target.value)} />
-                  <input type="text" style={{ ...ST.inputDisabled, color: totalVal < 0 ? C.danger : C.accent, WebkitTextFillColor: totalVal < 0 ? C.danger : C.accent }} value={fmt(totalVal)} readOnly />
+                  <input type="number" style={ST.inputSm} value={entered ? cur : ""} placeholder="0" onChange={e => handleCurrentChange(d.id, "weeklyCollections", e.target.value)} />
+                  <input type="text" style={{ ...ST.inputDisabled, color: totalVal < 0 ? C.danger : C.accent }} value={fmt(totalVal)} readOnly />
                 </div>
               );
             })}
@@ -1229,14 +1243,15 @@ function WeeklyCollSalesModal({ agents, selectedQ, quarterWeekly, onSave, onClos
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {data.map(d => {
               const autoPrev = getAutoPrev(d.weeklySales, wi);
-              const currentVal = d.weeklySales[wi]?.current || 0;
-              const totalVal = currentVal - autoPrev;
+              const cur = d.weeklySales[wi] ? d.weeklySales[wi].current : null;
+              const entered = cur !== null && cur !== undefined;
+              const totalVal = d.weeklySales[wi] ? (d.weeklySales[wi].total || 0) : 0;
               return (
                 <div key={d.id} style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr 1fr", gap: 4, alignItems: "center" }}>
                   <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{d.name}</span>
                   <input type="text" style={ST.inputDisabled} value={fmt(autoPrev)} readOnly title={`Auto-filled from ${prevHeader}`} />
-                  <input type="number" style={ST.inputSm} value={currentVal || ""} placeholder="0" onChange={e => handleCurrentChange(d.id, "weeklySales", e.target.value)} />
-                  <input type="text" style={{ ...ST.inputDisabled, color: totalVal < 0 ? C.danger : C.accent, WebkitTextFillColor: totalVal < 0 ? C.danger : C.accent }} value={fmt(totalVal)} readOnly />
+                  <input type="number" style={ST.inputSm} value={entered ? cur : ""} placeholder="0" onChange={e => handleCurrentChange(d.id, "weeklySales", e.target.value)} />
+                  <input type="text" style={{ ...ST.inputDisabled, color: totalVal < 0 ? C.danger : C.accent }} value={fmt(totalVal)} readOnly />
                 </div>
               );
             })}
