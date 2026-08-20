@@ -1206,7 +1206,7 @@ function WeeklyCollSalesModal({ agents, selectedQ, quarterWeekly, onSave, onClos
                   <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{d.name}</span>
                   <input type="text" style={ST.inputDisabled} value={fmt(autoPrev)} readOnly title={`Auto-filled from ${prevHeader}`} />
                   <input type="number" style={ST.inputSm} value={currentVal || ""} placeholder="0" onChange={e => handleCurrentChange(d.id, "weeklyCollections", e.target.value)} />
-                  <input type="text" style={{ ...ST.inputDisabled, color: totalVal < 0 ? C.danger : C.text }} value={fmt(totalVal)} readOnly />
+                  <input type="text" style={{ ...ST.inputDisabled, color: totalVal < 0 ? C.danger : C.text, WebkitTextFillColor: totalVal < 0 ? C.danger : C.text }} value={fmt(totalVal)} readOnly />
                 </div>
               );
             })}
@@ -1236,7 +1236,7 @@ function WeeklyCollSalesModal({ agents, selectedQ, quarterWeekly, onSave, onClos
                   <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{d.name}</span>
                   <input type="text" style={ST.inputDisabled} value={fmt(autoPrev)} readOnly title={`Auto-filled from ${prevHeader}`} />
                   <input type="number" style={ST.inputSm} value={currentVal || ""} placeholder="0" onChange={e => handleCurrentChange(d.id, "weeklySales", e.target.value)} />
-                  <input type="text" style={{ ...ST.inputDisabled, color: totalVal < 0 ? C.danger : C.text }} value={fmt(totalVal)} readOnly />
+                  <input type="text" style={{ ...ST.inputDisabled, color: totalVal < 0 ? C.danger : C.text, WebkitTextFillColor: totalVal < 0 ? C.danger : C.text }} value={fmt(totalVal)} readOnly />
                 </div>
               );
             })}
