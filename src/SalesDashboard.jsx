@@ -142,6 +142,57 @@ const makeEmptySalesForQ = (q) => getQThursdays(YEAR, q).map(() => ({ prev: 0, c
 const makeEmptyWeeks = () => new Array(LEGACY_NUM_WEEKS).fill(0);
 const makeEmptySales = () => LEGACY_THURSDAYS.map(() => ({ prev: 0, current: 0, total: 0 }));
 
+// ─── WEEKLY VALUE / ODOMETER HELPERS ───────────────────────────────
+// Reads a single week's contributing value whether it is stored as a legacy
+// plain number (old Collections) or a { prev, current, total } object (Sales,
+// and Collections after migration). NEVER returns undefined / NaN. This is what
+// lets old and new data formats coexist safely during rollout.
+const weekValue = (w) => {
+  if (typeof w === "number") return w;
+  if (w && typeof w.total === "number") return w.total;
+  return 0;
+};
+
+// The odometer (cumulative entry) resets at the start of every CALENDAR month.
+// A week is the first of its month when it is index 0 or its Thursday's month
+// differs from the previous Thursday's.
+const isMonthStart = (thursdays, i) =>
+  i <= 0 ||
+  thursdays[i].getMonth() !== thursdays[i - 1].getMonth() ||
+  thursdays[i].getFullYear() !== thursdays[i - 1].getFullYear();
+
+// MIGRATION / NORMALIZATION: turn any weekly series (numbers or objects) into a
+// clean month-scoped { prev, current, total } chain. Each week's delta (total)
+// is preserved EXACTLY, so no reported figure changes — only `current`/`prev`
+// are (re)derived so the odometer resets each month. Idempotent.
+const chainFromDeltas = (series, thursdays) => {
+  const out = [];
+  let running = 0;
+  for (let i = 0; i < thursdays.length; i++) {
+    if (isMonthStart(thursdays, i)) running = 0;
+    const delta = weekValue(series[i]);
+    out.push({ prev: running, current: running + delta, total: delta });
+    running += delta;
+  }
+  return out;
+};
+
+// MODAL SAVE: from the month-scoped `current` figures the user types, derive the
+// chain. Delta is SIGNED (no floor) so refunds/reversals show as negatives and
+// the summed deltas always tie back to the cumulative entered.
+const chainFromCurrents = (currents, thursdays) => {
+  const out = [];
+  for (let i = 0; i < thursdays.length; i++) {
+    const prev = isMonthStart(thursdays, i) ? 0 : (Number(currents[i - 1]) || 0);
+    const current = Number(currents[i]) || 0;
+    out.push({ prev, current, total: current - prev });
+  }
+  return out;
+};
+
+// Empty collections now match the sales shape (object per week).
+const makeEmptyCollections = () => LEGACY_THURSDAYS.map(() => ({ prev: 0, current: 0, total: 0 }));
+
 const DEFAULT_AGENTS = [
   { id: "a1", name: "Seyf", image: "", target: 40000 },
   { id: "a2", name: "Devon", image: "", target: 40000 },
@@ -172,7 +223,7 @@ const DEFAULT_COMPANY = {
 
 // ─── COMPUTED HELPERS ──────────────────────────────────────────────
 const sumArr = (arr) => (arr || []).reduce((s, v) => s + (typeof v === "number" ? v : 0), 0);
-const getMonthlyCollection = (agent) => sumArr(agent.weeklyCollections);
+const getMonthlyCollection = (agent) => (agent.weeklyCollections || []).reduce((s, w) => s + weekValue(w), 0);
 const getMonthlyLeads = (agent) => sumArr(agent.weeklyLeads);
 const getMonthlySales = (agent) => (agent.weeklySales || []).reduce((s, w) => s + (w.total || 0), 0);
 
@@ -183,7 +234,7 @@ const getMonthBreakdown = (agent, field) => {
   LEGACY_THURSDAYS.forEach((t, i) => {
     const m = getMonthFromThursday(t);
     if (field === "leads") result[m] = (result[m]||0) + ((agent.weeklyLeads || [])[i] || 0);
-    else if (field === "collections") result[m] = (result[m]||0) + ((agent.weeklyCollections || [])[i] || 0);
+    else if (field === "collections") result[m] = (result[m]||0) + weekValue((agent.weeklyCollections || [])[i]);
     else if (field === "sales") result[m] = (result[m]||0) + (((agent.weeklySales || [])[i] || {}).total || 0);
   });
   return result;
@@ -249,7 +300,7 @@ const getAgentMonthData = (agent, monthIdx, aprilBackfill = {}, monthlyData = {}
     let collections = 0, sales = 0, leads = 0;
     LEGACY_THURSDAYS.forEach((t, i) => {
       if (t.getMonth() === monthIdx) {
-        collections += (agent.weeklyCollections || [])[i] || 0;
+        collections += weekValue((agent.weeklyCollections || [])[i]);
         sales += ((agent.weeklySales || [])[i] || {}).total || 0;
         leads += (agent.weeklyLeads || [])[i] || 0;
       }
@@ -267,7 +318,7 @@ const getAgentMonthData = (agent, monthIdx, aprilBackfill = {}, monthlyData = {}
   let collections = 0, sales = 0, leads = 0;
   qThursdays.forEach((t, i) => {
     if (t.getMonth() === monthIdx) {
-      collections += (qData.collections || [])[i] || 0;
+      collections += weekValue((qData.collections || [])[i]);
       sales += ((qData.sales || [])[i] || {}).total || 0;
       leads += (qData.leads || [])[i] || 0;
     }
@@ -618,7 +669,7 @@ function TVWeekly({ agents, tvDisplayMonth, aprilBackfill = {}, monthlyData = {}
           const qKey = `q${q}`;
           const qData = !isQ2 ? (quarterWeekly[qKey] && quarterWeekly[qKey][a.id]) : null;
           return (<tr key={a.id}><td style={{ ...ST.td, borderRadius: "8px 0 0 8px", fontWeight: 600, color: "#f1f5f9" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: c, marginRight: 8 }} />{a.name}</td>
-            {monthTh.indices.map(j => { const v = isQ2 ? ((a.weeklyCollections||[])[j]||0) : ((qData?.collections||[])[j]||0); total += v; return <td key={j} style={{ ...ST.td, textAlign: "right" }}>{v > 0 ? fmt(v) : <span style={{ color: C.textDim }}>—</span>}</td>; })}
+            {monthTh.indices.map(j => { const v = isQ2 ? weekValue((a.weeklyCollections||[])[j]) : weekValue((qData?.collections||[])[j]); total += v; return <td key={j} style={{ ...ST.td, textAlign: "right" }}>{v !== 0 ? fmt(v) : <span style={{ color: C.textDim }}>—</span>}</td>; })}
             <td style={{ ...ST.td, borderRadius: "0 8px 8px 0", textAlign: "right", fontWeight: 700, color: c }}>{fmt(total)}</td></tr>);
         })}</tbody>
       </table>
@@ -1059,68 +1110,70 @@ function WeeklyCollSalesModal({ agents, selectedQ, quarterWeekly, onSave, onClos
   const numWeeks = thursdays.length;
   const qKey = `q${selectedQ}`;
 
+  // Normalise BOTH collections and sales into month-scoped { prev, current, total }
+  // chains. chainFromDeltas is idempotent and lossless: it preserves every week's
+  // delta and only (re)derives the cumulative so the odometer resets each month.
   const [data, setData] = useState(agents.map(a => {
     if (isLegacyQ2) {
-      return { id: a.id, name: a.name, weeklyCollections: [...(a.weeklyCollections || makeEmptyWeeks())], weeklySales: (a.weeklySales || makeEmptySales()).map(s => ({ ...s })) };
+      return {
+        id: a.id, name: a.name,
+        weeklyCollections: chainFromDeltas(a.weeklyCollections || makeEmptyCollections(), thursdays),
+        weeklySales: chainFromDeltas(a.weeklySales || makeEmptySales(), thursdays),
+      };
     }
     const qData = quarterWeekly[qKey] && quarterWeekly[qKey][a.id];
     return {
       id: a.id, name: a.name,
-      weeklyCollections: [...((qData && qData.collections) || new Array(numWeeks).fill(0))],
-      weeklySales: ((qData && qData.sales) || new Array(numWeeks).fill(null)).map(s => s ? { ...s } : { prev: 0, current: 0, total: 0 }),
+      weeklyCollections: chainFromDeltas((qData && qData.collections) || new Array(numWeeks).fill(0), thursdays),
+      weeklySales: chainFromDeltas((qData && qData.sales) || new Array(numWeeks).fill(0), thursdays),
     };
   }));
   const [wi, setWi] = useState(getCurrentWeekIndex(thursdays));
 
-  const getAutoPrev = (agentData, weekIdx) => {
-    if (weekIdx <= 0) return 0;
-    return agentData.weeklySales[weekIdx - 1]?.current || 0;
+  // Cumulative odometer — resets to 0 at the start of every calendar month.
+  const getAutoPrev = (arr, weekIdx) => {
+    if (isMonthStart(thursdays, weekIdx)) return 0;
+    return arr[weekIdx - 1]?.current || 0;
   };
 
-  const getMonthlyTotal = (agentData) => {
-    const selectedMonth = thursdays[wi].getMonth();
-    let total = 0;
-    thursdays.forEach((t, i) => {
-      if (t.getMonth() === selectedMonth) total += agentData.weeklyCollections[i] || 0;
-    });
-    return total;
-  };
-
-  const handleSalesCurrentChange = (id, val) => {
+  // One handler for both panels. field = "weeklyCollections" | "weeklySales".
+  const handleCurrentChange = (id, field, val) => {
     setData(prev => prev.map(d => {
       if (d.id !== id) return d;
-      const sales = d.weeklySales.map((s, j) => {
+      const arr = d[field].map((s, j) => {
         if (j !== wi) return s;
         const current = Number(val) || 0;
-        const prevVal = getAutoPrev(d, wi);
-        return { prev: prevVal, current, total: Math.max(current - prevVal, 0) };
+        const prevVal = getAutoPrev(d[field], wi);
+        return { prev: prevVal, current, total: current - prevVal }; // signed — no floor
       });
-      return { ...d, weeklySales: sales };
+      return { ...d, [field]: arr };
     }));
   };
 
+  // Rebuild a full chain from its current values (month reset + signed delta).
+  const rechain = (arr) => arr.map((s, j) => {
+    const prevVal = isMonthStart(thursdays, j) ? 0 : (arr[j - 1]?.current || 0);
+    const current = s.current || 0;
+    return { prev: prevVal, current, total: current - prevVal };
+  });
+
   const handleSave = () => {
-    const fixed = data.map(d => {
-      const sales = d.weeklySales.map((s, j) => {
-        const prevVal = j > 0 ? (d.weeklySales[j - 1]?.current || 0) : 0;
-        return { prev: prevVal, current: s.current || 0, total: Math.max((s.current || 0) - prevVal, 0) };
-      });
-      return { ...d, weeklySales: sales };
-    });
+    const fixed = data.map(d => ({
+      ...d,
+      weeklyCollections: rechain(d.weeklyCollections),
+      weeklySales: rechain(d.weeklySales),
+    }));
     onSave(fixed, selectedQ);
   };
 
-  const totalCol = data.reduce((s, d) => s + (d.weeklyCollections[wi] || 0), 0);
-  const totalSales = data.reduce((s, d) => {
-    const prevVal = getAutoPrev(d, wi);
-    const current = d.weeklySales[wi]?.current || 0;
-    return s + Math.max(current - prevVal, 0);
-  }, 0);
+  const weekDelta = (arr) => (arr[wi]?.current || 0) - getAutoPrev(arr, wi);
+  const totalCol = data.reduce((s, d) => s + weekDelta(d.weeklyCollections), 0);
+  const totalSales = data.reduce((s, d) => s + weekDelta(d.weeklySales), 0);
 
-  const prevHeader = wi > 0 ? `W/E ${formatThursday(thursdays[wi - 1])}` : "Opening";
+  const prevHeader = isMonthStart(thursdays, wi) ? "Opening" : `W/E ${formatThursday(thursdays[wi - 1])}`;
   const weekNum = getWeekOfMonth(thursdays[wi], thursdays);
   const weekSalesHeader = `Week ${weekNum} Sales`;
-  const selectedMonthName = MONTH_NAMES[thursdays[wi].getMonth()];
+  const weekCollHeader = `Week ${weekNum} Collections`;
 
   return (
     <div style={ST.modal} onClick={onClose}><div style={ST.mcWide} onClick={e => e.stopPropagation()}>
@@ -1134,27 +1187,33 @@ function WeeklyCollSalesModal({ agents, selectedQ, quarterWeekly, onSave, onClos
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-        {/* LEFT: Collections */}
+        {/* LEFT: Collections — cumulative entry, identical mechanism to Sales */}
         <div>
           <div style={{ fontSize: 14, fontWeight: 700, color: C.accent, marginBottom: 12, textTransform: "uppercase", letterSpacing: "1px" }}>📦 Collections</div>
-          <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr", gap: 4, marginBottom: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr 1fr", gap: 4, marginBottom: 8 }}>
             <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600 }}>Agent</div>
-            <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: "center" }}>This Week</div>
-            <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: "center" }}>{selectedMonthName} Total</div>
+            <div style={{ fontSize: 10, color: C.accent, fontWeight: 600, textAlign: "center" }}>{prevHeader}</div>
+            <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: "center" }}>Current Collections</div>
+            <div style={{ fontSize: 10, color: C.accent, fontWeight: 600, textAlign: "center" }}>{weekCollHeader}</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {data.map(d => (
-              <div key={d.id} style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr", gap: 4, alignItems: "center" }}>
-                <span style={{ fontWeight: 600, fontSize: 12, color: C.text, flexShrink: 0 }}>{d.name}</span>
-                <input type="number" style={ST.inputSm} value={d.weeklyCollections[wi] || ""} placeholder="0"
-                  onChange={e => setData(prev => prev.map(x => x.id === d.id ? { ...x, weeklyCollections: x.weeklyCollections.map((v, j) => j === wi ? (Number(e.target.value) || 0) : v) } : x))} />
-                <input type="text" style={ST.inputDisabled} value={fmt(getMonthlyTotal(d))} readOnly />
-              </div>
-            ))}
+            {data.map(d => {
+              const autoPrev = getAutoPrev(d.weeklyCollections, wi);
+              const currentVal = d.weeklyCollections[wi]?.current || 0;
+              const totalVal = currentVal - autoPrev;
+              return (
+                <div key={d.id} style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr 1fr", gap: 4, alignItems: "center" }}>
+                  <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{d.name}</span>
+                  <input type="text" style={ST.inputDisabled} value={fmt(autoPrev)} readOnly title={`Auto-filled from ${prevHeader}`} />
+                  <input type="number" style={ST.inputSm} value={currentVal || ""} placeholder="0" onChange={e => handleCurrentChange(d.id, "weeklyCollections", e.target.value)} />
+                  <input type="text" style={{ ...ST.inputDisabled, color: totalVal < 0 ? C.danger : undefined }} value={fmt(totalVal)} readOnly />
+                </div>
+              );
+            })}
           </div>
           <div style={{ marginTop: 12, padding: "10px 14px", background: C.cardAlt, borderRadius: 8, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>Total This Week</span>
-            <span style={{ fontWeight: 800, fontSize: 16, color: C.accent }}>{fmt(totalCol)} QAR</span>
+            <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{weekCollHeader} Total</span>
+            <span style={{ fontWeight: 800, fontSize: 16, color: totalCol < 0 ? C.danger : C.accent }}>{fmt(totalCol)} QAR</span>
           </div>
         </div>
 
@@ -1169,22 +1228,22 @@ function WeeklyCollSalesModal({ agents, selectedQ, quarterWeekly, onSave, onClos
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {data.map(d => {
-              const autoPrev = getAutoPrev(d, wi);
+              const autoPrev = getAutoPrev(d.weeklySales, wi);
               const currentVal = d.weeklySales[wi]?.current || 0;
-              const totalVal = Math.max(currentVal - autoPrev, 0);
+              const totalVal = currentVal - autoPrev;
               return (
                 <div key={d.id} style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr 1fr", gap: 4, alignItems: "center" }}>
                   <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{d.name}</span>
                   <input type="text" style={ST.inputDisabled} value={fmt(autoPrev)} readOnly title={`Auto-filled from ${prevHeader}`} />
-                  <input type="number" style={ST.inputSm} value={currentVal || ""} placeholder="0" onChange={e => handleSalesCurrentChange(d.id, e.target.value)} />
-                  <input type="text" style={ST.inputDisabled} value={fmt(totalVal)} readOnly />
+                  <input type="number" style={ST.inputSm} value={currentVal || ""} placeholder="0" onChange={e => handleCurrentChange(d.id, "weeklySales", e.target.value)} />
+                  <input type="text" style={{ ...ST.inputDisabled, color: totalVal < 0 ? C.danger : undefined }} value={fmt(totalVal)} readOnly />
                 </div>
               );
             })}
           </div>
           <div style={{ marginTop: 12, padding: "10px 14px", background: C.cardAlt, borderRadius: 8, display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{weekSalesHeader} Total</span>
-            <span style={{ fontWeight: 800, fontSize: 16, color: C.success }}>{fmt(totalSales)} QAR</span>
+            <span style={{ fontWeight: 800, fontSize: 16, color: totalSales < 0 ? C.danger : C.success }}>{fmt(totalSales)} QAR</span>
           </div>
         </div>
       </div>
@@ -2018,8 +2077,8 @@ export default function SalesDashboard() {
     // This Week calculations (only for Q2 since that's where weekly data lives)
     const currentWi = getCurrentWeekIndex(LEGACY_THURSDAYS);
     const prevWi = currentWi > 0 ? currentWi - 1 : null;
-    const thisWeekCol = agents.reduce((s, a) => s + ((a.weeklyCollections || [])[currentWi] || 0), 0);
-    const prevWeekCol = prevWi !== null ? agents.reduce((s, a) => s + ((a.weeklyCollections || [])[prevWi] || 0), 0) : 0;
+    const thisWeekCol = agents.reduce((s, a) => s + weekValue((a.weeklyCollections || [])[currentWi]), 0);
+    const prevWeekCol = prevWi !== null ? agents.reduce((s, a) => s + weekValue((a.weeklyCollections || [])[prevWi]), 0) : 0;
     const thisWeekLeads = agents.reduce((s, a) => s + ((a.weeklyLeads || [])[currentWi] || 0), 0);
     const prevWeekLeads = prevWi !== null ? agents.reduce((s, a) => s + ((a.weeklyLeads || [])[prevWi] || 0), 0) : 0;
     const thisWeekSales = agents.reduce((s, a) => s + (((a.weeklySales || [])[currentWi] || {}).total || 0), 0);
@@ -2191,9 +2250,9 @@ export default function SalesDashboard() {
                 {monthThursdays.indices.map(j => {
                   let v;
                   if (isQ2) {
-                    v = tableView === "collections" ? ((a.weeklyCollections||[])[j]||0) : (((a.weeklySales||[])[j]||{}).total||0);
+                    v = tableView === "collections" ? weekValue((a.weeklyCollections||[])[j]) : (((a.weeklySales||[])[j]||{}).total||0);
                   } else {
-                    v = tableView === "collections" ? ((qData?.collections||[])[j]||0) : (((qData?.sales||[])[j]||{}).total||0);
+                    v = tableView === "collections" ? weekValue((qData?.collections||[])[j]) : (((qData?.sales||[])[j]||{}).total||0);
                   }
                   monthTotal += v;
                   return <td key={j} style={{ ...ST.td, textAlign: "right" }}>{v > 0 ? fmt(v) : <span style={{ color: C.textDim }}>—</span>}</td>;
